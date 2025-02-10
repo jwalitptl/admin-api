@@ -6,33 +6,46 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/jwalitptl/admin-api/internal/model"
+	"github.com/jwalitptl/admin-api/internal/repository"
 )
+
+type rbacRepository struct {
+	BaseRepository
+}
+
+func NewRBACRepository(base BaseRepository) repository.RBACRepository {
+	return &rbacRepository{base}
+}
 
 // All RBAC repository methods here
 
 func (r *rbacRepository) CreateRole(ctx context.Context, role *model.Role) error {
 	query := `
-		INSERT INTO roles (id, name, description, is_system_role, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO roles (
+			id, name, description, is_system_role, region_code,
+			created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`
+
 	role.ID = uuid.New()
 	role.CreatedAt = time.Now()
 	role.UpdatedAt = time.Now()
 
-	_, err := r.db.ExecContext(ctx, query,
-		role.ID,
-		role.Name,
-		role.Description,
-		role.IsSystemRole,
-		role.CreatedAt,
-		role.UpdatedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create role: %w", err)
-	}
-	return nil
+	return r.WithTx(ctx, func(tx *sqlx.Tx) error {
+		_, err := tx.ExecContext(ctx, query,
+			role.ID,
+			role.Name,
+			role.Description,
+			role.IsSystemRole,
+			r.GetRegionFromContext(ctx),
+			role.CreatedAt,
+			role.UpdatedAt,
+		)
+		return err
+	})
 }
 
 func (r *rbacRepository) GetRole(ctx context.Context, id uuid.UUID) (*model.Role, error) {
@@ -326,23 +339,22 @@ func (r *rbacRepository) ListClinicianRoles(ctx context.Context, clinicianID, or
 	return roles, nil
 }
 
-func (r *rbacRepository) HasPermission(ctx context.Context, clinicianID uuid.UUID, permission string, organizationID uuid.UUID) (bool, error) {
+func (r *rbacRepository) HasPermission(ctx context.Context, userID uuid.UUID, permission string, organizationID uuid.UUID) (bool, error) {
 	query := `
 		SELECT EXISTS (
-			SELECT 1 FROM clinician_roles cr
-			JOIN role_permissions rp ON cr.role_id = rp.role_id
+			SELECT 1 FROM user_roles ur
+			JOIN role_permissions rp ON ur.role_id = rp.role_id
 			JOIN permissions p ON rp.permission_id = p.id
-			WHERE cr.clinician_id = $1
-			AND cr.organization_id = $2
+			WHERE ur.user_id = $1
+			AND ur.organization_id = $2
 			AND p.name = $3
+			AND ur.deleted_at IS NULL
+			AND p.deleted_at IS NULL
 		)
 	`
 	var hasPermission bool
-	err := r.db.GetContext(ctx, &hasPermission, query, clinicianID, organizationID, permission)
-	if err != nil {
-		return false, fmt.Errorf("failed to check permission: %w", err)
-	}
-	return hasPermission, nil
+	err := r.GetDB().GetContext(ctx, &hasPermission, query, userID, organizationID, permission)
+	return hasPermission, err
 }
 
 func (r *rbacRepository) AssignRole(ctx context.Context, clinicianID, roleID uuid.UUID) error {
@@ -351,4 +363,36 @@ func (r *rbacRepository) AssignRole(ctx context.Context, clinicianID, roleID uui
 
 func (r *rbacRepository) RemoveRole(ctx context.Context, clinicianID, roleID uuid.UUID) error {
 	return r.RemoveRoleFromClinician(ctx, clinicianID, roleID, uuid.Nil)
+}
+
+func (r *rbacRepository) GetUserRoles(ctx context.Context, userID uuid.UUID) ([]*model.Role, error) {
+	query := `
+		SELECT r.* FROM roles r
+		JOIN user_roles ur ON r.id = ur.role_id
+		WHERE ur.user_id = $1 AND r.deleted_at IS NULL
+		ORDER BY r.name
+	`
+
+	var roles []*model.Role
+	if err := r.db.SelectContext(ctx, &roles, query, userID); err != nil {
+		return nil, fmt.Errorf("failed to get user roles: %w", err)
+	}
+
+	return roles, nil
+}
+
+func (r *rbacRepository) GetRolePermissions(ctx context.Context, roleID uuid.UUID) ([]*model.Permission, error) {
+	query := `
+		SELECT p.* FROM permissions p
+		JOIN role_permissions rp ON p.id = rp.permission_id
+		WHERE rp.role_id = $1 AND p.deleted_at IS NULL
+		ORDER BY p.name
+	`
+
+	var permissions []*model.Permission
+	if err := r.db.SelectContext(ctx, &permissions, query, roleID); err != nil {
+		return nil, fmt.Errorf("failed to get role permissions: %w", err)
+	}
+
+	return permissions, nil
 }

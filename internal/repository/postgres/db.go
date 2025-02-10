@@ -6,7 +6,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 
-	"github.com/jwalitptl/pkg/config"
+	"github.com/jwalitptl/admin-api/pkg/config"
 )
 
 func NewDB(cfg config.DatabaseConfig) (*sqlx.DB, error) {

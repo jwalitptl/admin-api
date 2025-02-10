@@ -9,45 +9,51 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+	_ "github.com/lib/pq"
 	"github.com/rs/zerolog/log"
-
-	"github.com/jwalitptl/pkg/config"
-	"github.com/jwalitptl/pkg/event"
-	"github.com/jwalitptl/pkg/messaging/redis"
-	"github.com/jwalitptl/pkg/worker"
 
 	"github.com/jwalitptl/admin-api/internal/handler"
 	"github.com/jwalitptl/admin-api/internal/handler/account"
 	"github.com/jwalitptl/admin-api/internal/handler/appointment"
-	"github.com/jwalitptl/admin-api/internal/handler/auth"
+	authHandler "github.com/jwalitptl/admin-api/internal/handler/auth"
 	"github.com/jwalitptl/admin-api/internal/handler/clinic"
-	"github.com/jwalitptl/admin-api/internal/handler/clinician"
+	"github.com/jwalitptl/admin-api/internal/handler/health"
 	"github.com/jwalitptl/admin-api/internal/handler/patient"
 	permissionHandler "github.com/jwalitptl/admin-api/internal/handler/permission"
-	"github.com/jwalitptl/admin-api/internal/handler/rbac"
+	"github.com/jwalitptl/admin-api/internal/handler/prometheus"
+	rbacHandler "github.com/jwalitptl/admin-api/internal/handler/rbac"
+	"github.com/jwalitptl/admin-api/internal/handler/user"
 	"github.com/jwalitptl/admin-api/internal/middleware"
+	"github.com/jwalitptl/admin-api/internal/model"
 	"github.com/jwalitptl/admin-api/internal/repository/postgres"
-	"github.com/jwalitptl/admin-api/internal/router"
 	accountService "github.com/jwalitptl/admin-api/internal/service/account"
 	appointmentService "github.com/jwalitptl/admin-api/internal/service/appointment"
-	authService "github.com/jwalitptl/admin-api/internal/service/auth"
 	clinicService "github.com/jwalitptl/admin-api/internal/service/clinic"
-	clinicianService "github.com/jwalitptl/admin-api/internal/service/clinician"
 	eventService "github.com/jwalitptl/admin-api/internal/service/event"
 	patientService "github.com/jwalitptl/admin-api/internal/service/patient"
 	permissionService "github.com/jwalitptl/admin-api/internal/service/permission"
 	rbacService "github.com/jwalitptl/admin-api/internal/service/rbac"
+	"github.com/jwalitptl/admin-api/internal/service/region"
+	userService "github.com/jwalitptl/admin-api/internal/service/user"
+	"github.com/jwalitptl/admin-api/pkg/event"
+	"github.com/jwalitptl/admin-api/pkg/messaging/redis"
+	"github.com/jwalitptl/admin-api/pkg/worker"
+	"golang.org/x/time/rate"
 )
 
 func main() {
 	// Load configuration
-	cfg, err := config.LoadConfig()
+	cfg, err := config.Load()
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to load configuration")
 	}
 
+	// After loading config
+	fmt.Printf("DEBUG: Loaded config: %+v\n", cfg.EventTracking)
+
 	// Initialize database
-	db, err := postgres.NewDB(cfg.Database)
+	db, err := sqlx.Connect("postgres", cfg.Database.URL)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to connect to database")
 	}
@@ -57,84 +63,137 @@ func main() {
 	accountRepo := postgres.NewAccountRepository(db)
 	organizationRepo := postgres.NewOrganizationRepository(db)
 	clinicRepo := postgres.NewClinicRepository(db)
-	clinicianRepo := postgres.NewClinicianRepository(db)
+	userRepo := postgres.NewUserRepository(db)
 	rbacRepo := postgres.NewRBACRepository(db)
 	appointmentRepo := postgres.NewAppointmentRepository(db)
 	patientRepo := postgres.NewPatientRepository(db)
 	permRepo := postgres.NewPermissionRepository(db)
-
-	// Initialize services
-	accountSvc := accountService.NewService(accountRepo, organizationRepo)
-	clinicSvc := clinicService.NewService(clinicRepo)
-	clinicianSvc := clinicianService.NewService(clinicianRepo)
-	rbacSvc := rbacService.NewService(rbacRepo)
-	authSvc := authService.NewService(clinicianRepo, cfg.JWT)
-	appointmentSvc := appointmentService.NewService(appointmentRepo)
-	patientSvc := patientService.NewService(patientRepo)
-	permService := permissionService.NewService(permRepo)
-
-	// Initialize outbox repository
 	outboxRepo := postgres.NewOutboxRepository(db)
-
-	// Initialize event service with outbox repository
-	eventSvc := eventService.NewService(outboxRepo)
-
-	// Initialize middleware
-	authMiddleware := middleware.NewAuthMiddleware(rbacSvc, authSvc)
-
-	// Initialize event tracking middleware
-	eventTracker := event.NewEventTrackerMiddleware(
-		&cfg.EventTracking,
-		eventSvc,
-	)
-
-	// Initialize handlers
-	h := handler.NewHandler()
-	accountHandler := account.NewHandler(accountSvc)
-	authHandler := auth.NewHandler(authSvc)
-	clinicHandler := clinic.NewHandler(clinicSvc)
-	clinicianHandler := clinician.NewHandler(clinicianSvc, db)
-	rbacHandler := rbac.NewHandler(rbacSvc)
-	appointmentHandler := appointment.NewHandler(appointmentSvc)
-	patientHandler := patient.NewHandler(patientSvc)
-	permHandler := permissionHandler.NewHandler(permService)
-
-	// Setup router
-	r := router.NewRouter(
-		authMiddleware,
-		accountHandler,
-		authHandler,
-		clinicHandler,
-		clinicianHandler,
-		rbacHandler,
-		appointmentHandler,
-		patientHandler,
-		permHandler,
-		h,
-	)
-
-	// Register routes after router creation
-	r.Setup()
-	patientHandler.RegisterRoutesWithEvents(r.Engine().Group("/api/v1"), eventTracker)
-	appointmentHandler.RegisterRoutesWithEvents(r.Engine().Group("/api/v1"), eventTracker)
-	clinicHandler.RegisterRoutesWithEvents(r.Engine().Group("/api/v1"), eventTracker)
-	clinicianHandler.RegisterRoutesWithEvents(r.Engine().Group("/api/v1"), eventTracker)
-
-	// Create server
-	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
-		Handler: r.Engine(),
-	}
+	auditRepo := postgres.NewAuditRepository(db)
+	regionRepo := postgres.NewRegionRepository(db)
+	tokenRepo := postgres.NewTokenRepository(db)
 
 	// Initialize Redis message broker
-	broker, err := redis.NewRedisBroker(cfg.Redis.URL)
+	broker, err := redis.NewRedisBroker("redis://redis:6379/0")
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to connect to Redis")
 	}
 
+	// Initialize services
+	accountSvc := accountService.NewService(accountRepo, organizationRepo, userRepo)
+	clinicSvc := clinicService.NewService(clinicRepo)
+	userSvc := userService.NewService(userRepo, organizationRepo)
+	rbacSvc := rbacService.NewService(rbacRepo)
+	jwtService := auth.NewJWTService(cfg.JWT.Secret)
+	authSvc := auth.NewService(
+		userRepo,
+		tokenRepo,
+		emailSvc,
+		jwtService,
+		cfg.JWT,
+	)
+	appointmentSvc := appointmentService.NewService(appointmentRepo)
+	permService := permissionService.NewService(permRepo)
+	eventSvc := eventService.NewService(outboxRepo, broker)
+	patientSvc := patientService.NewService(patientRepo)
+	auditSvc := audit.NewService(auditRepo)
+	regionSvc := region.NewService(regionRepo, geoIP, defaultConfig)
+
+	// Initialize middleware
+	authMiddleware := middleware.NewAuthMiddleware(rbacSvc, authSvc)
+	hipaaMiddleware := middleware.NewHIPAAMiddleware(auditSvc)
+
+	// Initialize event tracking middleware
+	eventTracker := event.NewEventTrackerMiddleware(eventSvc)
+
+	// Initialize region middleware
+	regionMiddleware := middleware.NewRegionMiddleware(regionSvc)
+	regionValidation := middleware.NewRegionValidationMiddleware(defaultConfig)
+
+	// Initialize handlers
+	h := handler.NewHandler()
+	accountHandler := account.NewHandler(accountSvc)
+	authHandler := authHandler.NewHandler(authSvc)
+	clinicHandler := clinic.NewHandler(clinicSvc, outboxRepo)
+	userHandler := user.NewHandler(userSvc, db)
+	rbacHandler := rbacHandler.NewHandler(rbacSvc)
+	appointmentHandler := appointment.NewHandler(appointmentSvc, outboxRepo)
+	permHandler := permissionHandler.NewHandler(permService, outboxRepo)
+	patientHandler := patient.NewHandler(patientSvc, outboxRepo)
+	auditHandler := audit.NewHandler(auditSvc)
+
+	// Setup router
+	r := router.NewRouter(
+		authMiddleware,
+		hipaaMiddleware,
+		regionMiddleware,
+		regionValidation,
+		accountHandler,
+		authHandler,
+		clinicHandler,
+		userHandler,
+		rbacHandler,
+		appointmentHandler,
+		permHandler,
+		patientHandler,
+		h,
+		eventTracker,
+	)
+
+	// Initialize rate limiter
+	rateLimiter := middleware.NewRateLimiter(rate.Limit(cfg.RateLimit.RequestsPerSecond), cfg.RateLimit.Burst)
+
+	// Add middlewares
+	r.Use(middleware.Logger())
+	r.Use(middleware.ErrorHandler())
+	if cfg.RateLimit.Enabled {
+		r.Use(rateLimiter.RateLimit())
+	}
+
+	// Add health check routes
+	healthHandler := health.NewHandler(db)
+	healthHandler.RegisterRoutes(r.Engine().Group("/"))
+
+	// Add metrics if enabled
+	if cfg.Monitoring.PrometheusEnabled {
+		p := prometheus.New()
+		r.Use(p.Middleware())
+		r.GET(cfg.Monitoring.MetricsPath, p.Handler())
+	}
+
+	// Register routes after router creation
+	r.Setup()
+
 	// Initialize and start outbox processor with broker
 	outboxProcessor := worker.NewOutboxProcessor(outboxRepo, broker)
-	go outboxProcessor.Start(context.Background())
+	processorCtx, processorCancel := context.WithCancel(context.Background())
+	defer processorCancel()
+	go outboxProcessor.Start(processorCtx)
+
+	// Initialize audit cleanup worker
+	auditCleanup := worker.NewAuditCleanupWorker(
+		auditRepo,
+		cfg.Audit.RetentionDays,
+		24*time.Hour, // Run cleanup daily
+	)
+
+	// Start audit cleanup worker
+	go auditCleanup.Start(processorCtx)
+
+	// Register audit routes
+	r.Engine().Group("/audit").Use(authMiddleware.Authenticate()).
+		Use(authMiddleware.RequireRole(model.UserTypeAdmin)).
+		GET("/logs", auditHandler.ListLogs)
+
+	// Create server
+	srv := &http.Server{
+		Addr:           fmt.Sprintf(":%d", cfg.Server.Port),
+		Handler:        r.Engine(),
+		ReadTimeout:    15 * time.Second,
+		WriteTimeout:   15 * time.Second,
+		IdleTimeout:    60 * time.Second,
+		MaxHeaderBytes: 1 << 20, // 1MB
+	}
 
 	// Start server
 	go func() {
@@ -156,4 +215,15 @@ func main() {
 	}
 
 	log.Info().Msg("server exited properly")
+
+	// Initialize tracer
+	tp, err := initTracer()
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to initialize tracer")
+	}
+	defer func() {
+		if err := tp.Shutdown(context.Background()); err != nil {
+			log.Error().Err(err).Msg("failed to shutdown tracer provider")
+		}
+	}()
 }

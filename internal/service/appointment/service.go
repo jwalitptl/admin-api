@@ -8,6 +8,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/jwalitptl/admin-api/internal/model"
+	"github.com/jwalitptl/admin-api/internal/repository"
+	"github.com/jwalitptl/admin-api/internal/service/audit"
+	"github.com/jwalitptl/admin-api/internal/service/notification"
 )
 
 // Add these constants for business rules
@@ -18,23 +21,20 @@ const (
 	MinAdvanceBooking      = 1 * time.Hour
 )
 
-// Extend Repository interface
-type Repository interface {
-	Create(ctx context.Context, appointment *model.Appointment) error
-	Get(ctx context.Context, id uuid.UUID) (*model.Appointment, error)
-	List(ctx context.Context, clinicID uuid.UUID, filters map[string]interface{}) ([]*model.Appointment, error)
-	Update(ctx context.Context, appointment *model.Appointment) error
-	CheckConflicts(ctx context.Context, clinicianID uuid.UUID, startTime, endTime time.Time, excludeID *uuid.UUID) (bool, error)
-	GetClinicianAppointments(ctx context.Context, clinicianID uuid.UUID, startDate, endDate time.Time) ([]*model.Appointment, error)
-	Delete(ctx context.Context, id uuid.UUID) error
-}
-
 type Service struct {
-	repo Repository
+	repo         repository.AppointmentRepository
+	notifSvc     notification.Service
+	auditor      *audit.Service
+	clinicianSvc repository.ClinicianRepository
 }
 
-func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
+func NewService(repo repository.AppointmentRepository, notifSvc notification.Service, clinicianSvc repository.ClinicianRepository, auditor *audit.Service) *Service {
+	return &Service{
+		repo:         repo,
+		notifSvc:     notifSvc,
+		clinicianSvc: clinicianSvc,
+		auditor:      auditor,
+	}
 }
 
 // Add validation function
@@ -42,25 +42,14 @@ func (s *Service) validateAppointmentTime(startTime, endTime time.Time) error {
 	now := time.Now()
 	duration := endTime.Sub(startTime)
 
-	// Check if appointment is in the future
 	if startTime.Before(now) {
 		return fmt.Errorf("appointment cannot be scheduled in the past")
 	}
 
-	// Check minimum advance booking
-	if startTime.Sub(now) < MinAdvanceBooking {
-		return fmt.Errorf("appointment must be scheduled at least %v in advance", MinAdvanceBooking)
-	}
-
-	// Check maximum advance booking
-	if startTime.Sub(now) > MaxAdvanceBooking {
-		return fmt.Errorf("appointment cannot be scheduled more than %v in advance", MaxAdvanceBooking)
-	}
-
-	// Check duration constraints
 	if duration < MinAppointmentDuration {
 		return fmt.Errorf("appointment duration must be at least %v", MinAppointmentDuration)
 	}
+
 	if duration > MaxAppointmentDuration {
 		return fmt.Errorf("appointment duration cannot exceed %v", MaxAppointmentDuration)
 	}
@@ -68,157 +57,137 @@ func (s *Service) validateAppointmentTime(startTime, endTime time.Time) error {
 	return nil
 }
 
-func (s *Service) CreateAppointment(ctx context.Context, req *model.CreateAppointmentRequest) (*model.Appointment, error) {
-	// Validate time range
-	if err := s.validateAppointmentTime(req.StartTime, req.EndTime); err != nil {
-		return nil, err
+func (s *Service) CreateAppointment(ctx context.Context, apt *model.Appointment) error {
+	if err := s.validateAppointment(apt); err != nil {
+		return fmt.Errorf("invalid appointment: %w", err)
 	}
 
-	// Check for scheduling conflicts
-	hasConflict, err := s.repo.CheckConflicts(ctx, req.ClinicianID, req.StartTime, req.EndTime, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check scheduling conflicts: %w", err)
-	}
-	if hasConflict {
-		return nil, fmt.Errorf("scheduling conflict: clinician already has an appointment during this time")
+	apt.ID = uuid.New()
+	apt.Status = model.AppointmentStatusScheduled
+	apt.CreatedAt = time.Now()
+	apt.UpdatedAt = time.Now()
+
+	if err := s.repo.Create(ctx, apt); err != nil {
+		return fmt.Errorf("failed to create appointment: %w", err)
 	}
 
-	appointment := &model.Appointment{
-		Base: model.Base{
-			ID: uuid.New(),
-		},
-		ClinicID:    req.ClinicID,
-		ClinicianID: req.ClinicianID,
-		PatientID:   req.PatientID,
-		StartTime:   req.StartTime,
-		EndTime:     req.EndTime,
-		Status:      model.AppointmentStatusScheduled,
-		Notes:       req.Notes,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+	// Send notifications
+	if err := s.notifyParticipants(ctx, apt, "appointment_created"); err != nil {
+		s.auditor.Log(ctx, apt.PatientID, apt.ClinicID, "notification_failed", "appointment", apt.ID, &audit.LogOptions{
+			Metadata: map[string]interface{}{
+				"error": err.Error(),
+			},
+		})
 	}
 
-	if err := s.repo.Create(ctx, appointment); err != nil {
-		return nil, fmt.Errorf("failed to create appointment: %w", err)
-	}
+	s.auditor.Log(ctx, apt.PatientID, apt.ClinicID, "create", "appointment", apt.ID, &audit.LogOptions{
+		Changes: apt,
+	})
 
-	return appointment, nil
+	return nil
 }
 
-// Add method to check clinician availability
-func (s *Service) GetClinicianAvailability(ctx context.Context, clinicianID uuid.UUID, date time.Time) ([]model.TimeSlot, error) {
-	// Get start and end of business hours (9 AM to 5 PM)
-	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 9, 0, 0, 0, date.Location())
-	endOfDay := time.Date(date.Year(), date.Month(), date.Day(), 17, 0, 0, 0, date.Location())
+func (s *Service) GetAppointment(ctx context.Context, id uuid.UUID) (*model.Appointment, error) {
+	apt, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get appointment: %w", err)
+	}
 
-	// Get all appointments for the day
-	appointments, err := s.repo.GetClinicianAppointments(ctx, clinicianID, startOfDay, endOfDay)
+	s.auditor.Log(ctx, apt.PatientID, apt.ClinicID, "read", "appointment", id, nil)
+	return apt, nil
+}
+
+func (s *Service) UpdateAppointment(ctx context.Context, apt *model.Appointment) error {
+	if err := s.validateAppointment(apt); err != nil {
+		return fmt.Errorf("invalid appointment: %w", err)
+	}
+
+	apt.UpdatedAt = time.Now()
+	if err := s.repo.Update(ctx, apt); err != nil {
+		return fmt.Errorf("failed to update appointment: %w", err)
+	}
+
+	// Send notifications
+	if err := s.notifyParticipants(ctx, apt, "appointment_updated"); err != nil {
+		s.auditor.Log(ctx, apt.PatientID, apt.ClinicID, "notification_failed", "appointment", apt.ID, &audit.LogOptions{
+			Metadata: map[string]interface{}{
+				"error": err.Error(),
+			},
+		})
+	}
+
+	s.auditor.Log(ctx, apt.PatientID, apt.ClinicID, "update", "appointment", apt.ID, &audit.LogOptions{
+		Changes: apt,
+	})
+
+	return nil
+}
+
+func (s *Service) CancelAppointment(ctx context.Context, id uuid.UUID, reason string) error {
+	apt, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return fmt.Errorf("failed to get appointment: %w", err)
+	}
+
+	if apt.Status == model.AppointmentStatusCancelled {
+		return fmt.Errorf("appointment is already cancelled")
+	}
+
+	if apt.Status == model.AppointmentStatusCompleted {
+		return fmt.Errorf("cannot cancel a completed appointment")
+	}
+
+	apt.Status = model.AppointmentStatusCancelled
+	apt.CancelReason = &reason
+	apt.UpdatedAt = time.Now()
+
+	if err := s.repo.Update(ctx, apt); err != nil {
+		return fmt.Errorf("failed to cancel appointment: %w", err)
+	}
+
+	// Send notifications
+	if err := s.notifyParticipants(ctx, apt, "appointment_cancelled"); err != nil {
+		s.auditor.Log(ctx, apt.PatientID, apt.ClinicID, "notification_failed", "appointment", apt.ID, &audit.LogOptions{
+			Metadata: map[string]interface{}{
+				"error": err.Error(),
+			},
+		})
+	}
+
+	s.auditor.Log(ctx, apt.PatientID, apt.ClinicID, "cancel", "appointment", id, &audit.LogOptions{
+		Changes: map[string]interface{}{
+			"status":        apt.Status,
+			"cancel_reason": reason,
+		},
+	})
+
+	return nil
+}
+
+func (s *Service) isTimeSlotAvailable(ctx context.Context, staffID uuid.UUID, start, end time.Time) (bool, error) {
+	conflicts, err := s.repo.FindConflictingAppointments(ctx, staffID, start, end)
+	if err != nil {
+		return false, err
+	}
+	return len(conflicts) == 0, nil
+}
+
+func (s *Service) GetClinicianAvailability(ctx context.Context, clinicianID uuid.UUID, date time.Time) ([]model.TimeSlot, error) {
+	schedule, err := s.repo.GetClinicianSchedule(ctx, clinicianID, date)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get clinician schedule: %w", err)
+	}
+
+	appointments, err := s.repo.GetClinicianAppointments(ctx, clinicianID, date, date.Add(24*time.Hour))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get clinician appointments: %w", err)
 	}
 
-	// Generate available time slots
-	slots := generateTimeSlots(startOfDay, endOfDay, 30*time.Minute) // 30-minute slots
-	availableSlots := filterAvailableSlots(slots, appointments)
-
-	return availableSlots, nil
+	return s.calculateAvailableSlots(schedule, appointments), nil
 }
 
-func (s *Service) UpdateAppointment(ctx context.Context, id uuid.UUID, req *model.UpdateAppointmentRequest) (*model.Appointment, error) {
-	appointment, err := s.repo.Get(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get appointment: %w", err)
-	}
-
-	// Store original times for conflict checking
-	originalStart := appointment.StartTime
-	originalEnd := appointment.EndTime
-
-	// Update fields if provided
-	if req.StartTime != nil {
-		appointment.StartTime = *req.StartTime
-	}
-	if req.EndTime != nil {
-		appointment.EndTime = *req.EndTime
-	}
-	if req.Status != nil {
-		// Validate status transition
-		if err := validateStatusTransition(appointment.Status, *req.Status); err != nil {
-			return nil, err
-		}
-		appointment.Status = *req.Status
-	}
-	if req.Notes != nil {
-		appointment.Notes = *req.Notes
-	}
-	if req.CancelReason != nil {
-		appointment.CancelReason = *req.CancelReason
-	}
-
-	// If times were updated, validate and check conflicts
-	if req.StartTime != nil || req.EndTime != nil {
-		if err := s.validateAppointmentTime(appointment.StartTime, appointment.EndTime); err != nil {
-			return nil, err
-		}
-
-		// Only check conflicts if the time has changed
-		if !appointment.StartTime.Equal(originalStart) || !appointment.EndTime.Equal(originalEnd) {
-			hasConflict, err := s.repo.CheckConflicts(ctx, appointment.ClinicianID, appointment.StartTime, appointment.EndTime, &id)
-			if err != nil {
-				return nil, fmt.Errorf("failed to check scheduling conflicts: %w", err)
-			}
-			if hasConflict {
-				return nil, fmt.Errorf("scheduling conflict: clinician already has an appointment during this time")
-			}
-		}
-	}
-
-	appointment.UpdatedAt = time.Now()
-
-	if err := s.repo.Update(ctx, appointment); err != nil {
-		return nil, fmt.Errorf("failed to update appointment: %w", err)
-	}
-
-	return appointment, nil
-}
-
-// Helper function to validate status transitions
-func validateStatusTransition(current, new model.AppointmentStatus) error {
-	// Define valid transitions
-	validTransitions := map[model.AppointmentStatus][]model.AppointmentStatus{
-		model.AppointmentStatusScheduled: {
-			model.AppointmentStatusConfirmed,
-			model.AppointmentStatusCancelled,
-		},
-		model.AppointmentStatusConfirmed: {
-			model.AppointmentStatusCompleted,
-			model.AppointmentStatusCancelled,
-		},
-		model.AppointmentStatusCancelled: {}, // No valid transitions from cancelled
-		model.AppointmentStatusCompleted: {}, // No valid transitions from completed
-	}
-
-	allowed := validTransitions[current]
-	for _, status := range allowed {
-		if status == new {
-			return nil
-		}
-	}
-
-	return fmt.Errorf("invalid status transition from %s to %s", current, new)
-}
-
-// Add these methods back
-func (s *Service) GetAppointment(ctx context.Context, id uuid.UUID) (*model.Appointment, error) {
-	appointment, err := s.repo.Get(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get appointment: %w", err)
-	}
-	return appointment, nil
-}
-
-func (s *Service) ListAppointments(ctx context.Context, clinicID uuid.UUID, filters map[string]interface{}) ([]*model.Appointment, error) {
-	appointments, err := s.repo.List(ctx, clinicID, filters)
+func (s *Service) ListAppointments(ctx context.Context, filters *model.AppointmentFilters) ([]*model.Appointment, error) {
+	appointments, err := s.repo.List(ctx, filters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list appointments: %w", err)
 	}
@@ -266,4 +235,68 @@ func (s *Service) DeleteAppointment(ctx context.Context, id uuid.UUID) error {
 	}
 
 	return s.repo.Delete(ctx, id)
+}
+
+func (s *Service) validateAppointment(apt *model.Appointment) error {
+	if apt.PatientID == uuid.Nil {
+		return fmt.Errorf("patient ID is required")
+	}
+
+	if apt.ClinicianID == uuid.Nil {
+		return fmt.Errorf("clinician ID is required")
+	}
+
+	if apt.ClinicID == uuid.Nil {
+		return fmt.Errorf("clinic ID is required")
+	}
+
+	duration := apt.EndTime.Sub(apt.StartTime)
+	if duration < MinAppointmentDuration || duration > MaxAppointmentDuration {
+		return fmt.Errorf("invalid appointment duration: must be between %v and %v", MinAppointmentDuration, MaxAppointmentDuration)
+	}
+
+	advance := apt.StartTime.Sub(time.Now())
+	if advance < MinAdvanceBooking || advance > MaxAdvanceBooking {
+		return fmt.Errorf("invalid booking time: must be between %v and %v in advance", MinAdvanceBooking, MaxAdvanceBooking)
+	}
+
+	hasConflict, err := s.repo.CheckConflict(context.Background(), apt)
+	if err != nil {
+		return fmt.Errorf("failed to check conflicts: %w", err)
+	}
+	if hasConflict {
+		return fmt.Errorf("appointment conflicts with existing booking")
+	}
+
+	return nil
+}
+
+func (s *Service) GetAvailableSlots(ctx context.Context, clinicianID uuid.UUID, date time.Time) ([]model.TimeSlot, error) {
+	clinician, err := s.clinicianSvc.Get(ctx, clinicianID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get clinician: %w", err)
+	}
+
+	schedule := s.getClinicianSchedule(clinician, date)
+	appointments, err := s.repo.GetClinicianAppointments(ctx, clinicianID, date, date.Add(24*time.Hour))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get clinician appointments: %w", err)
+	}
+
+	return s.calculateAvailableSlots(schedule, appointments), nil
+}
+
+func (s *Service) notifyParticipants(ctx context.Context, apt *model.Appointment, event string) error {
+	// Implementation of notifyParticipants method
+	return nil
+}
+
+func (s *Service) getClinicianSchedule(clinician *model.Clinician, date time.Time) []*model.TimeSlot {
+	// Implementation of getClinicianSchedule method
+	return nil
+}
+
+func (s *Service) calculateAvailableSlots(schedule []*model.TimeSlot, appointments []*model.Appointment) []model.TimeSlot {
+	// Implementation of calculateAvailableSlots method
+	return nil
 }

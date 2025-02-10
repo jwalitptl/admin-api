@@ -6,12 +6,6 @@ import (
 	"github.com/google/uuid"
 )
 
-type Base struct {
-	ID        uuid.UUID `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
 type Clinic struct {
 	Base
 	OrganizationID uuid.UUID `db:"organization_id" json:"organization_id"`

@@ -5,53 +5,53 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 
-	"github.com/jwalitptl/pkg/service/auth"
-	"github.com/jwalitptl/pkg/service/rbac"
-
-	"github.com/jwalitptl/admin-api/internal/handler"
+	"github.com/jwalitptl/admin-api/internal/service/auth"
+	"github.com/jwalitptl/admin-api/internal/service/rbac"
 )
 
 type AuthMiddleware struct {
 	rbacService rbac.Service
-	authService auth.Service
+	authSvc     *auth.Service
 }
 
-func NewAuthMiddleware(rbacService rbac.Service, authService auth.Service) *AuthMiddleware {
+func NewAuthMiddleware(rbacService rbac.Service, authSvc *auth.Service) *AuthMiddleware {
 	return &AuthMiddleware{
 		rbacService: rbacService,
-		authService: authService,
+		authSvc:     authSvc,
 	}
 }
 
 // Authenticate verifies the JWT token and sets clinician info in context
 func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, handler.NewErrorResponse("missing authorization header"))
-			c.Abort()
+		token := c.GetHeader("Authorization")
+		if token == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "missing authorization header",
+			})
 			return
 		}
 
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.JSON(http.StatusUnauthorized, handler.NewErrorResponse("invalid authorization format"))
-			c.Abort()
-			return
-		}
+		// Remove Bearer prefix
+		token = strings.TrimPrefix(token, "Bearer ")
 
-		claims, err := m.authService.ValidateToken(c.Request.Context(), parts[1])
+		claims, err := m.authSvc.ValidateToken(c.Request.Context(), token)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, handler.NewErrorResponse("invalid token"))
-			c.Abort()
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "invalid token",
+			})
 			return
 		}
 
-		// Set clinician info in context
-		c.Set("clinicianID", claims.ClinicianID)
-		c.Set("clinicianEmail", claims.Email)
+		// Add claims to context
+		c.Set("user_id", claims.UserID)
+		c.Set("email", claims.Email)
+		c.Set("user_type", claims.Type)
+		c.Set("organization_id", claims.OrganizationID)
+		c.Set("roles", claims.Roles)
+		c.Set("permissions", claims.Permissions)
+
 		c.Next()
 	}
 }
@@ -59,38 +59,94 @@ func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 // RequirePermission checks if the clinician has the required permission
 func (m *AuthMiddleware) RequirePermission(permission string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		clinicianID, err := uuid.Parse(c.GetString("clinicianID"))
-		if err != nil {
-			c.JSON(http.StatusUnauthorized, handler.NewErrorResponse("invalid clinician ID"))
-			c.Abort()
+		userID := c.GetString("user_id")
+		if userID == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "user not authenticated",
+			})
 			return
 		}
 
-		orgID := c.GetHeader("X-Organization-ID")
-		if orgID == "" {
-			c.JSON(http.StatusBadRequest, handler.NewErrorResponse("organization ID is required"))
-			c.Abort()
+		// Get permissions from context
+		permissions, exists := c.Get("permissions")
+		if !exists {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": "no permissions found",
+			})
 			return
 		}
 
-		organizationID, err := uuid.Parse(orgID)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid organization ID"))
-			c.Abort()
-			return
-		}
-
-		hasPermission, err := m.rbacService.HasPermission(c.Request.Context(), clinicianID, permission, organizationID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, handler.NewErrorResponse("failed to check permission"))
-			c.Abort()
-			return
+		// Check if user has required permission
+		hasPermission := false
+		for _, p := range permissions.([]string) {
+			if p == permission {
+				hasPermission = true
+				break
+			}
 		}
 
 		if !hasPermission {
-			c.JSON(http.StatusForbidden, handler.NewErrorResponse("permission denied"))
-			c.Abort()
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": "permission denied",
+			})
 			return
+		}
+
+		c.Next()
+	}
+}
+
+// RequireRole middleware checks if the authenticated user has the required role
+func (m *AuthMiddleware) RequireRole(roles ...string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userType, exists := c.Get("user_type")
+		if !exists {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			return
+		}
+
+		hasRole := false
+		for _, role := range roles {
+			if strings.EqualFold(userType.(string), role) {
+				hasRole = true
+				break
+			}
+		}
+
+		if !hasRole {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
+			return
+		}
+
+		c.Next()
+	}
+}
+
+func (m *AuthMiddleware) ValidatePermissions() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Get required permissions from route metadata
+		requiredPerms := c.GetStringSlice("required_permissions")
+		if len(requiredPerms) == 0 {
+			c.Next()
+			return
+		}
+
+		// Get user permissions from context
+		userPerms := c.GetStringSlice("permissions")
+
+		// Check if user has required permissions
+		for _, required := range requiredPerms {
+			hasPermission := false
+			for _, userPerm := range userPerms {
+				if required == userPerm {
+					hasPermission = true
+					break
+				}
+			}
+			if !hasPermission {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
+				return
+			}
 		}
 
 		c.Next()

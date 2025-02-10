@@ -8,30 +8,34 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=postgres
-      - DB_PASSWORD=postgres
-      - DB_NAME=aiclinic
-      - DB_SSLMODE=disable
-      - JWT_SECRET=your-256-bit-secret
-      - JWT_REFRESH_SECRET=your-refresh-secret
+      CONFIG_FILE: /app/config/config.yml
+    volumes:
+      - ./migrations:/migrations
+      - ./config/config.yml:/app/config/config.yml
+    command: >
+      /bin/sh -c "
+        while ! nc -z postgres 5432; do
+          echo 'Waiting for postgres...';
+          sleep 1;
+        done;
+        echo 'PostgreSQL is ready!';
+        ./admin-api
+      "
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - app-network
     restart: unless-stopped
-    volumes:
-      - ./migrations:/migrations
-    command: sh -c "migrate -path=/migrations -database postgres://postgres:postgres@postgres:5432/aiclinic?sslmode=disable up && ./admin-api"
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:15
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=aiclinic
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: aiclinic
     ports:
       - "5432:5432"
     volumes:
@@ -43,10 +47,24 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    hostname: postgres
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:
 
 networks:
   app-network:
+    name: app-network
     driver: bridge 
