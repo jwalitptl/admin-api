@@ -1,8 +1,0 @@
-DROP TABLE IF EXISTS clinician_roles;
-DROP TABLE IF EXISTS role_permissions;
-DROP TABLE IF EXISTS permissions;
-DROP TABLE IF EXISTS roles;
-DROP TABLE IF EXISTS clinicians;
-DROP TABLE IF EXISTS clinics;
-DROP TABLE IF EXISTS organizations;
-DROP TABLE IF EXISTS accounts; 

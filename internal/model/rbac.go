@@ -7,21 +7,27 @@ import (
 )
 
 type Role struct {
-	Base
-	Name           string     `db:"name" json:"name"`
-	Description    string     `db:"description" json:"description"`
-	OrganizationID *uuid.UUID `db:"organization_id" json:"organization_id,omitempty"`
-	IsSystemRole   bool       `db:"is_system_role" json:"is_system_role"`
-	CreatedAt      time.Time  `db:"created_at" json:"created_at"`
-	UpdatedAt      time.Time  `db:"updated_at" json:"updated_at"`
+	ID             uuid.UUID  `json:"id" db:"id"`
+	Name           string     `json:"name" db:"name"`
+	Description    string     `json:"description" db:"description"`
+	OrganizationID *uuid.UUID `json:"organization_id" db:"organization_id"`
+	IsSystemRole   bool       `json:"is_system_role" db:"is_system_role"`
+	CreatedAt      time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at" db:"updated_at"`
+	DeletedAt      *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`
 }
 
 type Permission struct {
 	Base
-	Name        string    `db:"name" json:"name"`
-	Description string    `db:"description" json:"description"`
-	CreatedAt   time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
+	ID             uuid.UUID  `json:"id" db:"id"`
+	OrganizationID uuid.UUID  `json:"organization_id" db:"organization_id"`
+	Name           string     `json:"name" db:"name"`
+	Resource       string     `json:"resource" db:"resource"`
+	Action         string     `json:"action" db:"action"`
+	Description    string     `json:"description" db:"description"`
+	CreatedAt      time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at" db:"updated_at"`
+	DeletedAt      *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`
 }
 
 type RolePermission struct {
@@ -36,3 +42,17 @@ type ClinicianRole struct {
 	RoleID         uuid.UUID `json:"role_id"`
 	OrganizationID uuid.UUID `json:"organization_id"`
 }
+
+const (
+	// Permission constants
+	PermissionCreatePatient     = "create:patient"
+	PermissionReadPatient       = "read:patient"
+	PermissionUpdatePatient     = "update:patient"
+	PermissionDeletePatient     = "delete:patient"
+	PermissionCreateAppointment = "create:appointment"
+	PermissionReadAppointment   = "read:appointment"
+	PermissionUpdateAppointment = "update:appointment"
+	PermissionDeleteAppointment = "delete:appointment"
+	PermissionManageUsers       = "manage:users"
+	PermissionManageRoles       = "manage:roles"
+)

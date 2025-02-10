@@ -8,7 +8,16 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/jwalitptl/admin-api/internal/model"
+	"github.com/jwalitptl/admin-api/internal/repository"
 )
+
+type clinicRepository struct {
+	BaseRepository
+}
+
+func NewClinicRepository(base BaseRepository) repository.ClinicRepository {
+	return &clinicRepository{base}
+}
 
 // All clinic repository methods here
 

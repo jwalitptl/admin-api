@@ -1,0 +1,7 @@
+---
+description: pkg folder rules
+globs: /pkg
+---
+pkg folder should have only reusable code 
+none of the file should import code from outside of pkg folder code 
+pkg folder should not have circular import

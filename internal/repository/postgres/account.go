@@ -6,36 +6,48 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
+	"github.com/jmoiron/sqlx"
 	"github.com/jwalitptl/admin-api/internal/model"
+	"github.com/jwalitptl/admin-api/internal/repository"
 )
+
+type accountRepository struct {
+	BaseRepository
+}
+
+func NewAccountRepository(base BaseRepository) repository.AccountRepository {
+	return &accountRepository{base}
+}
 
 // All account repository methods here
 
-func (r *accountRepository) CreateAccount(ctx context.Context, account *model.Account) error {
+func (r *accountRepository) Create(ctx context.Context, account *model.Account) error {
 	query := `
-		INSERT INTO accounts (id, name, email, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO accounts (
+			id, name, email, password_hash, status,
+			created_at, updated_at, region_code
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`
 	account.ID = uuid.New()
 	account.CreatedAt = time.Now()
 	account.UpdatedAt = time.Now()
 
-	_, err := r.db.ExecContext(ctx, query,
-		account.ID,
-		account.Name,
-		account.Email,
-		account.Status,
-		account.CreatedAt,
-		account.UpdatedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create account: %w", err)
-	}
-	return nil
+	return r.WithTx(ctx, func(tx *sqlx.Tx) error {
+		_, err := tx.ExecContext(ctx, query,
+			account.ID,
+			account.Name,
+			account.Email,
+			account.PasswordHash,
+			account.Status,
+			account.CreatedAt,
+			account.UpdatedAt,
+			r.GetRegionFromContext(ctx),
+		)
+		return err
+	})
 }
 
-func (r *accountRepository) GetAccount(ctx context.Context, id uuid.UUID) (*model.Account, error) {
+func (r *accountRepository) Get(ctx context.Context, id uuid.UUID) (*model.Account, error) {
 	query := `
 		SELECT id, name, email, status, created_at, updated_at
 		FROM accounts
@@ -49,7 +61,7 @@ func (r *accountRepository) GetAccount(ctx context.Context, id uuid.UUID) (*mode
 	return &account, nil
 }
 
-func (r *accountRepository) UpdateAccount(ctx context.Context, account *model.Account) error {
+func (r *accountRepository) Update(ctx context.Context, account *model.Account) error {
 	query := `
 		UPDATE accounts
 		SET name = $1, email = $2, status = $3, updated_at = $4
@@ -79,7 +91,7 @@ func (r *accountRepository) UpdateAccount(ctx context.Context, account *model.Ac
 	return nil
 }
 
-func (r *accountRepository) DeleteAccount(ctx context.Context, id uuid.UUID) error {
+func (r *accountRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	query := `
 		DELETE FROM accounts
 		WHERE id = $1
@@ -100,7 +112,7 @@ func (r *accountRepository) DeleteAccount(ctx context.Context, id uuid.UUID) err
 	return nil
 }
 
-func (r *accountRepository) ListAccounts(ctx context.Context) ([]*model.Account, error) {
+func (r *accountRepository) List(ctx context.Context) ([]*model.Account, error) {
 	query := `
 		SELECT id, name, email, status, created_at, updated_at
 		FROM accounts

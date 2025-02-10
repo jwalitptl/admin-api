@@ -1,355 +1,193 @@
-.PHONY: build run test clean docker-build docker-run
+.PHONY: test-api ensure-api test-cleanup test-user-api test-events test-patient test-clinic
 
-# Build variables
-BINARY_NAME=admin-api
-BUILD_DIR=bin
-
-# Go commands
-build:
-	go build -o $(BUILD_DIR)/$(BINARY_NAME) ./admin-api/cmd/api
-
-run: build
-	./$(BUILD_DIR)/$(BINARY_NAME)
-
-test:
-	go test -v ./...
-
-clean:
-	rm -rf $(BUILD_DIR)
-	go clean
-
-# Docker commands
-docker-build:
-	docker compose build
-
-docker-run:
-	docker compose up
-
-docker-down:
-	docker compose down
-
-# Development helpers
-dev: docker-down docker-build docker-run
-
-# Add these commands
-check-services:
-	@echo "\nRunning containers:"
-	docker ps -a
-	@echo "\nDocker images:"
-	docker images
-	@echo "\nDocker networks:"
-	docker network ls
-
-check-api-logs:
-	@echo "\nAPI Logs:"
-	docker-compose logs api
-
-check-postgres-logs:
-	@echo "\nPostgres Logs:"
-	docker-compose logs postgres
-
-# Add new debug command
-debug:
-	@echo "Full system check..."
-	@make check-services
-	@make check-api-logs
-	@make check-postgres-logs
-	@echo "\nDocker compose config:"
-	docker-compose config
-
-# Add a quick start command for testing
-start-test:
-	@echo "Starting services in foreground mode..."
-	docker-compose up --build 
-
-# Add these test commands
-test-flow:
-	@echo "\n1. Creating account..."
-	@curl -v -X POST http://localhost:8080/api/v1/accounts \
-		-H "Content-Type: application/json" \
-		-d '{"name":"Test Account","email":"test@example.com"}'
-
-	@echo "\n2. Creating clinician..."
-	@curl -v -X POST http://localhost:8080/api/v1/clinicians \
-		-H "Content-Type: application/json" \
-		-d '{"email":"doctor@example.com","name":"Dr. Smith","password":"password123"}'
-
-	@echo "\n3. Testing login..."
-	@curl -v -X POST http://localhost:8080/api/v1/auth/login \
-		-H "Content-Type: application/json" \
-		-d '{"email":"doctor@example.com","password":"password123"}'
-
-	@echo "\nNote: Save the access_token from the login response for authenticated requests"
-
-# Add this to test authenticated endpoints
-test-auth:
-	@echo "\nTesting authenticated endpoint (replace TOKEN with actual token)..."
-	@curl -v -X GET http://localhost:8080/api/v1/accounts \
-		-H "Authorization: Bearer YOUR_TOKEN_HERE"
-
-# Add a helper to save token
-save-token:
-	@curl -s -X POST http://localhost:8080/api/v1/auth/login \
-		-H "Content-Type: application/json" \
-		-d '{"email":"doctor@example.com","password":"password123"}' \
-		| grep -o '"access_token":"[^"]*' | cut -d'"' -f4 > .token
-
-# Use saved token
-test-with-token:
-	@TOKEN=$$(cat .token); \
-	curl -v -X GET http://localhost:8080/api/v1/accounts \
-		-H "Authorization: Bearer $$TOKEN" 
-
-# Add these new test commands
-test-organization:
-	@echo "\nCreating organization for account..."
-	@TOKEN=$$(cat .token); \
-	ACCOUNT_ID="72285c94-a49d-417b-8a52-26a4f06afc8c"; \
-	curl -v -X POST "http://localhost:8080/api/v1/accounts/$$ACCOUNT_ID/organizations" \
-		-H "Authorization: Bearer $$TOKEN" \
-		-H "Content-Type: application/json" \
-		-d '{"name":"Test Organization","status":"active"}'
-
-test-refresh:
-	@echo "\n=== Testing Token Refresh ==="
-	@REFRESH_TOKEN=$$(cat .refresh_token); \
-	curl -s -X POST http://localhost:8080/api/v1/auth/refresh \
-		-H "Content-Type: application/json" \
-		-d "{\"refresh_token\":\"$$REFRESH_TOKEN\"}" | jq
-
-test-full-flow: test-flow
-	@echo "\nWaiting for token to be saved..."
-	@sleep 2
-	@make save-token
-	@make test-with-token
-	@make test-organization
-	@make test-refresh
-
-# Add error case testing
-test-errors:
-	@echo "\nTesting invalid login..."
-	@curl -v -X POST http://localhost:8080/api/v1/auth/login \
-		-H "Content-Type: application/json" \
-		-d '{"email":"wrong@example.com","password":"wrong"}'
-
-	@echo "\nTesting unauthorized access..."
-	@curl -v -X GET http://localhost:8080/api/v1/accounts
-
-	@echo "\nTesting invalid token..."
-	@curl -v -X GET http://localhost:8080/api/v1/accounts \
-		-H "Authorization: Bearer invalid.token.here" 
-
-# API Testing Suite
-.PHONY: test-api-* test-all ensure-api
-
-# Main test command that runs all tests in sequence
-test-all: check-dependencies
-	@echo "\n=== Starting Test Suite ==="
-	
-	@echo "\n=== 1. Initial Setup ==="
-	# Create admin clinician first
-	@curl -s -X POST http://localhost:8080/api/v1/clinicians \
-		-H "Content-Type: application/json" \
-		-d '{"email":"admin@example.com","name":"Admin","password":"password123"}' | jq
-
-	# Login to get token
-	@curl -s -X POST http://localhost:8080/api/v1/auth/login \
-		-H "Content-Type: application/json" \
-		-d '{"email":"admin@example.com","password":"password123"}' | tee auth.json | jq
-
-	@echo "\n=== Saving tokens ==="
-	@cat auth.json | jq -r '.data.access_token' > .token
-	@cat auth.json | jq -r '.data.refresh_token' > .refresh_token
-
-	# Create account and organization with token
-	@TOKEN=$$(cat .token); \
-	echo "\nCreating account..." && \
-	curl -s -X POST http://localhost:8080/api/v1/accounts \
-		-H "Authorization: Bearer $$TOKEN" \
-		-H "Content-Type: application/json" \
-		-d '{"name":"Test Account","email":"account@example.com"}' | tee account.json | jq && \
-	ACCOUNT_ID=$$(cat account.json | jq -r '.data.id'); \
-	echo "\nCreating organization..." && \
-	curl -s -X POST "http://localhost:8080/api/v1/accounts/$$ACCOUNT_ID/organizations" \
-		-H "Authorization: Bearer $$TOKEN" \
-		-H "Content-Type: application/json" \
-		-d '{"name":"Test Organization","status":"active"}' | tee org.json | jq
-	
-	@echo "\n=== Testing Protected Endpoints ==="
-	@make test-api-accounts
-	@make test-api-clinics
-	@make test-api-clinicians
-	@make test-api-rbac
-	@make test-api-errors
-	
-	@echo "\n=== Test Suite Completed ==="
-	@rm -f auth.json .token .refresh_token account.json org.json
-
-# Authentication Tests
-test-api-auth:
-	@echo "\n=== Testing Authentication ==="
-	@echo "\n1. Login with invalid credentials..."
-	@curl -s -X POST http://localhost:8080/api/v1/auth/login \
-		-H "Content-Type: application/json" \
-		-d '{"email":"wrong@example.com","password":"wrong"}' | jq
-
-	@echo "\n2. Create test clinician..."
-	@curl -s -X POST http://localhost:8080/api/v1/clinicians \
-		-H "Content-Type: application/json" \
-		-d '{"email":"doctor@example.com","name":"Dr. Smith","password":"password123"}' | jq
-
-	@echo "\n3. Login with valid credentials..."
-	@curl -s -X POST http://localhost:8080/api/v1/auth/login \
-		-H "Content-Type: application/json" \
-		-d '{"email":"doctor@example.com","password":"password123"}' | jq
-
-	@echo "\n4. Test token refresh..."
-	@make test-refresh
-
-# Account Tests
-test-api-accounts:
-	@echo "\n=== Testing Accounts ==="
-	@TOKEN=$$(cat .token); \
-	curl -s -X GET http://localhost:8080/api/v1/accounts \
-		-H "Authorization: Bearer $$TOKEN" | jq
-
-	@TOKEN=$$(cat .token); \
-	ACCOUNT_ID=$$(curl -s -X GET http://localhost:8080/api/v1/accounts \
-		-H "Authorization: Bearer $$TOKEN" | jq -r '.data[0].id'); \
-	curl -s -X POST "http://localhost:8080/api/v1/accounts/$$ACCOUNT_ID/organizations" \
-		-H "Authorization: Bearer $$TOKEN" \
-		-H "Content-Type: application/json" \
-		-d '{"name":"Test Organization","status":"active"}' | jq
-
-# Helper function to get organization ID
-define get_org_id
-$(shell curl -s -X GET http://localhost:8080/api/v1/accounts \
-	-H "Authorization: Bearer $$(cat .token)" | jq -r '.data[0].organizations[0].id')
-endef
-
-# Update test-api-clinics with better organization ID handling
-test-api-clinics:
-	@echo "\n=== Testing Clinics ==="
-	@TOKEN=$$(cat .token); \
-	ORG_ID=$$(curl -s -X GET http://localhost:8080/api/v1/accounts \
-		-H "Authorization: Bearer $$TOKEN" | jq -r '.data[0].organizations[0].id'); \
-	echo "Using Organization ID: $$ORG_ID" && \
-	echo "\n2. Create clinic..." && \
-	curl -s -X POST "http://localhost:8080/api/v1/clinics" \
-		-H "Authorization: Bearer $$TOKEN" \
-		-H "Content-Type: application/json" \
-		-d "{\"organization_id\":\"$$ORG_ID\",\"name\":\"Test Clinic\",\"location\":\"Test Location\"}" | jq && \
-	echo "\n3. List clinics..." && \
-	curl -s -X GET "http://localhost:8080/api/v1/clinics?organization_id=$$ORG_ID" \
-		-H "Authorization: Bearer $$TOKEN" | jq
-
-# Update test-api-clinicians with better organization ID handling
-test-api-clinicians:
-	@echo "\n=== Testing Clinicians ==="
-	@TOKEN=$$(cat .token); \
-	ORG_ID=$$(curl -s -X GET http://localhost:8080/api/v1/accounts \
-		-H "Authorization: Bearer $$TOKEN" | jq -r '.data[0].organizations[0].id'); \
-	echo "Using Organization ID: $$ORG_ID" && \
-	echo "\n2. Create another clinician..." && \
-	curl -s -X POST http://localhost:8080/api/v1/clinicians \
-		-H "Authorization: Bearer $$TOKEN" \
-		-H "Content-Type: application/json" \
-		-d "{\"organization_id\":\"$$ORG_ID\",\"email\":\"doctor2@example.com\",\"name\":\"Dr. Jones\",\"password\":\"password123\"}" | jq && \
-	echo "\n3. List clinicians..." && \
-	curl -s -X GET "http://localhost:8080/api/v1/clinicians?organization_id=$$ORG_ID" \
-		-H "Authorization: Bearer $$TOKEN" | jq
-
-# Update test-api-rbac with better organization ID handling
-test-api-rbac:
-	@echo "\n=== Testing RBAC ==="
-	@TOKEN=$$(cat .token); \
-	ORG_ID=$$(curl -s -X GET http://localhost:8080/api/v1/accounts \
-		-H "Authorization: Bearer $$TOKEN" | jq -r '.data[0].organizations[0].id'); \
-	echo "Using Organization ID: $$ORG_ID" && \
-	echo "\n2. Create role..." && \
-	curl -s -X POST http://localhost:8080/api/v1/rbac/roles \
-		-H "Authorization: Bearer $$TOKEN" \
-		-H "Content-Type: application/json" \
-		-d "{\"name\":\"Doctor\",\"organization_id\":\"$$ORG_ID\",\"description\":\"Doctor role\"}" | jq && \
-	echo "\n3. Create permission..." && \
-	curl -s -X POST http://localhost:8080/api/v1/rbac/permissions \
-		-H "Authorization: Bearer $$TOKEN" \
-		-H "Content-Type: application/json" \
-		-d "{\"name\":\"patient:read\",\"organization_id\":\"$$ORG_ID\",\"description\":\"Can read patient data\"}" | jq
-
-# Error Tests
-test-api-errors:
-	@echo "\n=== Testing Error Cases ==="
-	@echo "\n1. Invalid login..."
-	@curl -s -X POST http://localhost:8080/api/v1/auth/login \
-		-H "Content-Type: application/json" \
-		-d '{"email":"wrong@example.com","password":"wrong"}' | jq
-
-	@echo "\n2. Missing token..."
-	@curl -s -X GET http://localhost:8080/api/v1/accounts | jq
-
-	@echo "\n3. Invalid token..."
-	@curl -s -X GET http://localhost:8080/api/v1/accounts \
-		-H "Authorization: Bearer invalid.token" | jq
-
-	@echo "\n4. Invalid input data..."
-	@curl -s -X POST http://localhost:8080/api/v1/accounts \
-		-H "Content-Type: application/json" \
-		-d '{"name":"","email":"invalid"}' | jq
-
-# Add jq installation check
-check-dependencies:
-	@which jq > /dev/null || (echo "Error: jq is not installed. Please install jq first." && exit 1) 
-
-# Add these database-related commands
-migrate-reset:
-	@echo "Resetting database..."
-	docker compose exec admin-api migrate -path=/migrations -database postgres://postgres:postgres@postgres:5432/aiclinic?sslmode=disable drop -f
-	docker compose exec admin-api migrate -path=/migrations -database postgres://postgres:postgres@postgres:5432/aiclinic?sslmode=disable up
-
-# Add a simpler migrate command for just running migrations
-migrate:
-	@echo "Running migrations..."
-	docker compose exec admin-api migrate -path=/migrations -database postgres://postgres:postgres@postgres:5432/aiclinic?sslmode=disable up
-
-# Add these test commands
-test-permissions:
-	@echo "Testing permissions API..."
-	@TOKEN=$$(curl -s -X POST http://localhost:8080/api/v1/auth/login \
-		-H 'Content-Type: application/json' \
-		-d '{"email":"admin@example.com","password":"admin123"}' | jq -r '.data.access_token'); \
-	echo "Token: $$TOKEN" && \
-	echo "\nTesting roles endpoint..." && \
-	curl -v -X GET "http://localhost:8080/api/v1/rbac/roles" \
-		-H "Authorization: Bearer $$TOKEN"
-
-test-roles:
-	@echo "Testing roles API..."
-	@TOKEN=$$(curl -s -X POST http://localhost:8080/api/v1/auth/login \
-		-H 'Content-Type: application/json' \
-		-d '{"email":"admin@example.com","password":"admin123"}' | jq -r '.data.access_token'); \
-	echo "Creating role..." && \
-	curl -s -X POST "http://localhost:8080/api/v1/rbac/roles" \
-		-H "Authorization: Bearer $$TOKEN" \
-		-H "Content-Type: application/json" \
-		-d '{"name":"doctor","description":"Doctor role"}' | jq && \
-	echo "\nListing roles..." && \
-	curl -s -X GET "http://localhost:8080/api/v1/rbac/roles" \
-		-H "Authorization: Bearer $$TOKEN" | jq
-
-.PHONY: test-api
-
-ensure-api:
-	@echo "Ensuring API is running..."
-	@docker compose ps | grep -q "admin-api.*Up" || (echo "Starting API..." && docker compose up -d)
-	@sleep 5  # Give the API time to start
-
+# Start services and test account creation API
 test-api: ensure-api
-	@echo "Running API tests..."
-	@go test ./test/api/... -v
+	@echo "🚀 Testing Account Creation API..."
+	@echo "\n1. Rebuilding and starting services..."
+	@docker compose build --no-cache admin-api
+	@docker compose up -d postgres redis admin-api
+	@echo "⏳ Waiting for services to be ready..."
+	@echo "Waiting for API to be healthy..."
+	@for i in {1..30}; do \
+	  if curl -s http://localhost:8080/health/live > /dev/null; then \
+		echo "API is ready!"; \
+		break; \
+	  fi; \
+	  echo "Waiting... $$i/30"; \
+	  if [ $$i -eq 15 ]; then \
+		echo "\n🔍 Checking API logs:"; \
+		docker compose logs admin-api; \
+	  fi; \
+	  sleep 1; \
+	done
 
-test-api-verbose: ensure-api
-	@echo "Running API tests with verbose output..."
-	@go test ./test/api/... -v -count=1
+	@echo "\n2. Running migrations..."
+	@docker compose exec admin-api migrate -path=/app/migrations -database "postgres://postgres:postgres@postgres:5432/aiclinic?sslmode=disable" up
 
-.DEFAULT_GOAL := build 
+	@echo "\n3. Testing Account Creation endpoint..."
+	@echo "Creating account..."
+	@ACCOUNT_RESPONSE=$$(curl -s -X POST http://localhost:8080/api/v1/accounts \
+		-H "Content-Type: application/json" \
+		-d '{ \
+			"name": "Test Hospital", \
+			"email": "admin@hospital.com", \
+			"password": "password123", \
+			"status": "active" \
+		}') \
+	&& echo "Account creation response: $$ACCOUNT_RESPONSE" \
+	&& echo $$ACCOUNT_RESPONSE | jq -r '.data.id' > account_id.txt
+
+	@echo "\nVerifying account in database..."
+	@docker compose exec postgres psql -U postgres -d aiclinic -c "SELECT id, email, status FROM accounts;"
+
+	@echo "\n4. Creating Organization..."
+	@ACCOUNT_ID=$$(cat account_id.txt) && \
+	ORG_RESPONSE=$$(curl -s -X POST http://localhost:8080/api/v1/accounts/$$ACCOUNT_ID/organizations \
+		-H "Content-Type: application/json" \
+		-d '{ \
+			"name": "Test Organization", \
+			"status": "active" \
+		}') \
+	&& echo "Organization creation response: $$ORG_RESPONSE" \
+	&& echo $$ORG_RESPONSE | jq -r '.data.id' > org_id.txt
+
+	@echo "\nVerifying organization in database..."
+	@docker compose exec postgres psql -U postgres -d aiclinic -c "SELECT id, name, status FROM organizations;"
+
+	@echo "\nCreated organization with ID: $$(cat org_id.txt)"
+
+# Ensure clean environment and dependencies
+ensure-api:
+	@echo "🧹 Cleaning up previous instances..."
+	@docker compose down -v
+	@echo "📦 Checking dependencies..."
+	@which migrate || go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+	@echo "🔄 Starting required services..."
+	@docker compose up -d postgres redis
+	@echo "⏳ Waiting for databases to be ready..."
+	@sleep 5
+
+# Cleanup after testing
+test-cleanup:
+	@echo "🧹 Cleaning up test environment..."
+	@rm -f account_id.txt org_id.txt token.txt
+	@docker compose down -v 
+
+test-user-api:
+	@echo "🚀 Testing User Creation API..."
+	@echo "\n1. Getting auth token..."
+	@TOKEN=$$(curl -s -X POST http://localhost:8080/api/v1/auth/login \
+		-H "Content-Type: application/json" \
+		-d '{"email":"admin@hospital.com","password":"password123"}' | jq -r '.data.access_token') \
+	&& if [ "$$TOKEN" = "null" ]; then \
+		echo "Failed to get token"; \
+		exit 1; \
+	fi \
+	&& echo "Got token: $$TOKEN" \
+	&& curl -v -X POST http://localhost:8080/api/v1/users \
+		-H "Content-Type: application/json" \
+		-H "Authorization: Bearer $$TOKEN" \
+		-d "{ \
+			\"organization_id\": \"$$(cat org_id.txt)\", \
+			\"name\": \"Test User\", \
+			\"email\": \"test@example.com\", \
+			\"password\": \"password123\", \
+			\"type\": \"admin\" \
+		}"
+
+test-events: ensure-api
+	@echo "🚀 Testing Event System..."
+	@echo "\n1. Waiting for account setup..."
+	@sleep 5  # Add delay to ensure account is ready
+	@echo "\n2. Getting auth token..."
+	@echo "Attempting login with admin@hospital.com..."
+	@TOKEN=$$(curl -s -X POST http://localhost:8080/api/v1/auth/login \
+		-H "Content-Type: application/json" \
+		-d '{"email":"admin@hospital.com","password":"password123"}') \
+	&& echo "Login response: $$TOKEN" \
+	&& TOKEN_VALUE=$$(echo "$$TOKEN" | jq -r '.data.access_token') \
+	&& if [ "$$TOKEN_VALUE" = "null" ]; then \
+		echo "Failed to get token. Full response: $$TOKEN"; \
+		exit 1; \
+	fi \
+	&& echo "Got token: $$TOKEN_VALUE" \
+	&& echo "\n3. Creating user..." \
+	&& ORG_ID=$$(cat org_id.txt) \
+	&& echo "Using org ID: $$ORG_ID" \
+	&& curl -s -X POST http://localhost:8080/api/v1/users \
+		-H "Content-Type: application/json" \
+		-H "Authorization: Bearer $$TOKEN_VALUE" \
+		-d "{ \
+			\"organization_id\": \"$$ORG_ID\", \
+			\"name\": \"Test User\", \
+			\"email\": \"test@example.com\", \
+			\"password\": \"password123\", \
+			\"type\": \"admin\" \
+		}"
+
+	@echo "\n4. Checking outbox events in database..."
+	@docker compose exec postgres psql -U postgres -d aiclinic -c "SELECT event_type, status, error FROM outbox_events WHERE event_type IN ('CLINIC_CREATE', 'CLINIC_UPDATE', 'CLINIC_DELETE', 'PATIENT_CREATE', 'PATIENT_UPDATE', 'PATIENT_DELETE') ORDER BY created_at DESC LIMIT 5;"
+
+	@echo "\n5. Checking events in Redis..."
+	@echo "All Redis keys:"
+	@docker compose exec redis redis-cli KEYS "*"
+	@echo "\nEvent details (events list):"
+	@docker compose exec redis redis-cli --raw LRANGE events 0 -1 || echo "No events found"
+	@echo "\nEvent details (event.* keys):"
+	@docker compose exec redis redis-cli --raw KEYS "event.*" || echo "No event.* keys found"
+	@echo "\nEvent details (outbox.* keys):"
+	@docker compose exec redis redis-cli --raw KEYS "outbox.*" || echo "No outbox.* keys found"
+
+	@echo "\nTest complete! 🎉"
+
+# Regular test without logs
+test-all: ensure-api test-api test-events test-clinic test-patient
+	@make test-cleanup
+
+# Test with logs
+test-all-debug: ensure-api test-api test-events test-clinic test-patient
+	@echo "\n🔍 Checking container logs..."
+	@docker compose logs
+	@echo "\nDone checking logs"
+	@make test-cleanup
+
+# Fix the token issue in test-patient and test-clinic
+test-patient:
+	@echo "\n6. Creating patient..."
+	@TOKEN=$$(curl -s -X POST http://localhost:8080/api/v1/auth/login \
+		-H "Content-Type: application/json" \
+		-d '{"email":"admin@hospital.com","password":"password123"}' | jq -r '.data.access_token') \
+	&& echo "Using clinic ID: $$(cat clinic_id.txt)" \
+	&& REQUEST='{ \
+			"organization_id": "'$$(cat org_id.txt)'", \
+			"clinic_id": "'$$(cat clinic_id.txt)'", \
+			"name": "Test Patient", \
+			"email": "patient@example.com", \
+			"phone": "+1234567890", \
+			"dob": "1990-01-01T00:00:00.000Z", \
+			"address": "123 Patient St", \
+			"status": "active" \
+		}' \
+	&& echo "Request: $$REQUEST" \
+	&& curl -v -X POST http://localhost:8080/api/v1/patients \
+		-H "Content-Type: application/json" \
+		-H "Authorization: Bearer $$TOKEN" \
+		-d "$$REQUEST"
+
+test-clinic:
+	@echo "\n7. Creating clinic..."
+	@TOKEN=$$(curl -s -X POST http://localhost:8080/api/v1/auth/login \
+		-H "Content-Type: application/json" \
+		-d '{"email":"admin@hospital.com","password":"password123"}' | jq -r '.data.access_token') \
+	&& RESPONSE=$$(curl -s -X POST http://localhost:8080/api/v1/clinics \
+		-H "Content-Type: application/json" \
+		-H "Authorization: Bearer $$TOKEN" \
+		-d "{ \
+			\"organization_id\": \"$$(cat org_id.txt)\", \
+			\"name\": \"Test Clinic\", \
+			\"address\": \"123 Test St\", \
+			\"location\": \"Building A\", \
+			\"status\": \"active\" \
+		}") \
+	&& echo $$RESPONSE \
+	&& echo $$RESPONSE | jq -r '.data.id' > clinic_id.txt 

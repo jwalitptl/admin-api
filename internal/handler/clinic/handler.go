@@ -1,24 +1,28 @@
 package clinic
 
 import (
+	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/jwalitptl/pkg/event"
-	"github.com/jwalitptl/pkg/model"
-	clinicService "github.com/jwalitptl/pkg/service/clinic"
+	"github.com/jwalitptl/admin-api/internal/model"
+	clinicService "github.com/jwalitptl/admin-api/internal/service/clinic"
+	"github.com/jwalitptl/admin-api/pkg/event"
 
 	"github.com/jwalitptl/admin-api/internal/handler"
+	"github.com/jwalitptl/admin-api/internal/repository"
 )
 
 type Handler struct {
-	service clinicService.Service
+	service    clinicService.ClinicServicer
+	outboxRepo repository.OutboxRepository
 }
 
-func NewHandler(service clinicService.Service) *Handler {
-	return &Handler{service: service}
+func NewHandler(service clinicService.ClinicServicer, outboxRepo repository.OutboxRepository) *Handler {
+	return &Handler{service: service, outboxRepo: outboxRepo}
 }
 
 func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
@@ -35,9 +39,9 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 func (h *Handler) RegisterRoutesWithEvents(r *gin.RouterGroup, eventTracker *event.EventTrackerMiddleware) {
 	clinics := r.Group("/clinics")
 	{
-		clinics.POST("", eventTracker.TrackEvent("clinic", "create"), h.CreateClinic)
-		clinics.PUT("/:id", eventTracker.TrackEvent("clinic", "update"), h.UpdateClinic)
-		clinics.DELETE("/:id", eventTracker.TrackEvent("clinic", "delete"), h.DeleteClinic)
+		clinics.POST("", eventTracker.TrackEvent("CLINIC", "CREATE"), h.CreateClinic)
+		clinics.PUT("/:id", eventTracker.TrackEvent("CLINIC", "UPDATE"), h.UpdateClinic)
+		clinics.DELETE("/:id", eventTracker.TrackEvent("CLINIC", "DELETE"), h.DeleteClinic)
 		clinics.GET("", h.ListClinics)
 		clinics.GET("/:id", h.GetClinic)
 	}
@@ -74,12 +78,16 @@ func (h *Handler) CreateClinic(c *gin.Context) {
 		return
 	}
 
-	// Set event context
-	eventCtx, _ := c.Get("eventCtx")
-	if ctx, ok := eventCtx.(*event.EventContext); ok {
-		ctx.NewData = clinic
-		ctx.Additional = map[string]interface{}{
-			"organization_id": orgID,
+	// Create outbox event
+	payload, err := json.Marshal(clinic)
+	if err != nil {
+		log.Printf("Failed to marshal clinic for event: %v", err)
+	} else {
+		if err := h.outboxRepo.Create(c.Request.Context(), &model.OutboxEvent{
+			EventType: "CLINIC_CREATE",
+			Payload:   payload,
+		}); err != nil {
+			log.Printf("Failed to create outbox event: %v", err)
 		}
 	}
 
@@ -121,7 +129,7 @@ func (h *Handler) UpdateClinic(c *gin.Context) {
 		return
 	}
 
-	oldClinic, err := h.service.GetClinic(c.Request.Context(), id)
+	_, err = h.service.GetClinic(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
 		return
@@ -139,13 +147,16 @@ func (h *Handler) UpdateClinic(c *gin.Context) {
 		return
 	}
 
-	// Set event context
-	eventCtx, _ := c.Get("eventCtx")
-	if ctx, ok := eventCtx.(*event.EventContext); ok {
-		ctx.OldData = oldClinic
-		ctx.NewData = clinic
-		ctx.Additional = map[string]interface{}{
-			"clinic_id": id,
+	// Create outbox event for update
+	payload, err := json.Marshal(clinic)
+	if err != nil {
+		log.Printf("Failed to marshal clinic for event: %v", err)
+	} else {
+		if err := h.outboxRepo.Create(c.Request.Context(), &model.OutboxEvent{
+			EventType: "CLINIC_UPDATE",
+			Payload:   payload,
+		}); err != nil {
+			log.Printf("Failed to create outbox event: %v", err)
 		}
 	}
 
@@ -159,7 +170,7 @@ func (h *Handler) DeleteClinic(c *gin.Context) {
 		return
 	}
 
-	clinic, err := h.service.GetClinic(c.Request.Context(), id)
+	_, err = h.service.GetClinic(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
 		return
@@ -170,13 +181,16 @@ func (h *Handler) DeleteClinic(c *gin.Context) {
 		return
 	}
 
-	// Set event context
-	eventCtx, _ := c.Get("eventCtx")
-	if ctx, ok := eventCtx.(*event.EventContext); ok {
-		ctx.OldData = clinic
-		ctx.Additional = map[string]interface{}{
-			"clinic_id":       id,
-			"organization_id": clinic.OrganizationID,
+	// Create outbox event for delete
+	payload, err := json.Marshal(map[string]interface{}{"id": id})
+	if err != nil {
+		log.Printf("Failed to marshal clinic ID for event: %v", err)
+	} else {
+		if err := h.outboxRepo.Create(c.Request.Context(), &model.OutboxEvent{
+			EventType: "CLINIC_DELETE",
+			Payload:   payload,
+		}); err != nil {
+			log.Printf("Failed to create outbox event: %v", err)
 		}
 	}
 

@@ -7,20 +7,12 @@ import (
 )
 
 type Clinician struct {
-	Base
-	Email        string    `db:"email" json:"email"`
-	Name         string    `db:"name" json:"name"`
-	Password     string    `db:"-" json:"password,omitempty"`
-	PasswordHash string    `db:"password_hash" json:"-"`
-	Status       string    `db:"status" json:"status"`
-	CreatedAt    time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt    time.Time `db:"updated_at" json:"updated_at"`
-}
-
-type ClinicianClinic struct {
-	Base
-	ClinicianID uuid.UUID  `json:"clinician_id"`
-	ClinicID    uuid.UUID  `json:"clinic_id"`
-	StartDate   time.Time  `json:"start_date"`
-	EndDate     *time.Time `json:"end_date,omitempty"`
+	ID         uuid.UUID `json:"id" db:"id"`
+	Name       string    `json:"name" db:"name"`
+	Email      string    `json:"email" db:"email"`
+	ClinicID   uuid.UUID `json:"clinic_id" db:"clinic_id"`
+	Speciality string    `json:"speciality" db:"speciality"`
+	Status     string    `json:"status" db:"status"`
+	CreatedAt  time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at" db:"updated_at"`
 }

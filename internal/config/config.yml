@@ -1,0 +1,202 @@
+server:
+  port: 8080
+  read_timeout: 15s
+  write_timeout: 15s
+  max_header_bytes: 1048576
+
+database:
+  host: postgres
+  port: 5432
+  user: postgres
+  password: postgres
+  name: aiclinic
+  sslmode: disable
+  max_open_conns: 25
+  max_idle_conns: 25
+  conn_max_lifetime: 5m
+
+jwt:
+  secret: your-256-bit-secret
+  refresh_secret: your-refresh-secret
+  expiry_hours: 24
+
+redis:
+  url: "redis://localhost:6379"
+  max_retries: 3
+  retry_backoff: 100ms
+  pool_size: 10
+  min_idle_conns: 2
+
+event_tracking:
+  enabled: true
+  endpoints:
+    account:
+      create:
+        enabled: true
+        event_type: "ACCOUNT_CREATED"
+        tracked_fields: ["id", "name", "email", "status"]
+      update:
+        enabled: true
+        event_type: "ACCOUNT_UPDATED"
+        track_changes: true
+        tracked_fields: ["name", "email", "status"]
+    organization:
+      create:
+        enabled: true
+        event_type: "ORGANIZATION_CREATED"
+        tracked_fields: ["id", "name", "account_id", "status"]
+      update:
+        enabled: true
+        event_type: "ORGANIZATION_UPDATED"
+        track_changes: true
+        tracked_fields: ["name", "status"]
+    user:
+      create:
+        enabled: true
+        event_type: USER_CREATED
+        tracked_fields:
+          - name
+          - email
+          - status
+          - type
+          - organization_id
+      update:
+        enabled: true
+        event_type: USER_UPDATED
+        track_changes: true
+        tracked_fields:
+          - name
+          - email
+          - status
+          - type
+      delete:
+        enabled: true
+        event_type: USER_DELETED
+        tracked_fields:
+          - id
+    patient:
+      create:
+        enabled: true
+        event_type: PATIENT_CREATED
+        tracked_fields:
+          - name
+          - email
+          - status
+          - dob
+          - phone
+          - address
+      update:
+        enabled: true
+        event_type: PATIENT_UPDATED
+        track_changes: true
+        tracked_fields:
+          - name
+          - email
+          - status
+          - dob
+          - phone
+      delete:
+        enabled: true
+        event_type: PATIENT_DELETED
+        tracked_fields:
+          - id
+    user_role:
+      create:
+        enabled: true
+        event_type: USER_ROLE_ASSIGNED
+        tracked_fields:
+          - user_id
+          - role_id
+          - organization_id
+      delete:
+        enabled: true
+        event_type: USER_ROLE_REMOVED
+        tracked_fields:
+          - user_id
+          - role_id
+    user_clinic:
+      create:
+        enabled: true
+        event_type: USER_CLINIC_ASSIGNED
+        tracked_fields:
+          - user_id
+          - clinic_id
+      delete:
+        enabled: true
+        event_type: USER_CLINIC_REMOVED
+        tracked_fields:
+          - user_id
+          - clinic_id
+    appointment:
+      create:
+        enabled: true
+        event_type: APPOINTMENT_CREATED
+        tracked_fields:
+          - user_id
+          - clinic_id
+          - start_time
+          - end_time
+          - status
+      update:
+        enabled: true
+        event_type: APPOINTMENT_UPDATED
+        track_changes: true
+        tracked_fields:
+          - start_time
+          - end_time
+          - status
+      delete:
+        enabled: true
+        event_type: APPOINTMENT_DELETED
+        tracked_fields:
+          - id
+    clinic:
+      create:
+        enabled: true
+        event_type: CLINIC_CREATED
+        tracked_fields:
+          - name
+          - location
+          - organization_id
+      update:
+        enabled: true
+        event_type: CLINIC_UPDATED
+        track_changes: true
+        tracked_fields:
+          - name
+          - location
+          - status
+      delete:
+        enabled: true
+        event_type: CLINIC_DELETED
+        tracked_fields:
+          - id
+
+outbox:
+  batch_size: 100
+  poll_interval: 5s
+  retry_attempts: 3
+  retry_delay: 1s
+  cleanup_interval: 24h
+  retention_period: 72h
+
+logging:
+  level: info
+  format: json
+  output: stdout
+
+metrics:
+  enabled: true
+  path: /metrics
+  namespace: aiclinic
+  subsystem: api
+
+tracing:
+  enabled: true
+  type: jaeger
+  endpoint: http://jaeger:14268/api/traces
+
+circuit_breaker:
+  max_requests: 100
+  interval: 10s
+  timeout: 5s 

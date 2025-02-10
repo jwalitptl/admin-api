@@ -1,0 +1,5 @@
+---
+description: global config
+globs: ./
+---
+Use .config/config.yaml for only one place to keep all the configuration 

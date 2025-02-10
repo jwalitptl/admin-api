@@ -1,40 +1,52 @@
 package rbac
 
 import (
+	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/jwalitptl/pkg/event"
-	"github.com/jwalitptl/pkg/model"
-	rbacService "github.com/jwalitptl/pkg/service/rbac"
+	"github.com/jwalitptl/admin-api/internal/model"
+	rbacService "github.com/jwalitptl/admin-api/internal/service/rbac"
+	"github.com/jwalitptl/admin-api/pkg/event"
 
 	"github.com/jwalitptl/admin-api/internal/handler"
+	"github.com/jwalitptl/admin-api/internal/repository/postgres"
 )
 
 type Handler struct {
-	service rbacService.Service
+	service    rbacService.Service
+	outboxRepo postgres.OutboxRepository
 }
 
-func NewHandler(service rbacService.Service) *Handler {
-	return &Handler{service: service}
+func NewHandler(service rbacService.Service, outboxRepo postgres.OutboxRepository) *Handler {
+	return &Handler{
+		service:    service,
+		outboxRepo: outboxRepo,
+	}
 }
 
 func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	rbac := r.Group("/rbac")
 	{
-		// Roles
-		rbac.GET("/roles", h.ListRoles)
-		rbac.POST("/roles", h.CreateRole)
-		rbac.GET("/roles/:id", h.GetRole)
-		rbac.PUT("/roles/:id", h.UpdateRole)
-		rbac.DELETE("/roles/:id", h.DeleteRole)
+		roles := rbac.Group("/roles")
+		{
+			roles.POST("", h.CreateRole)
+			roles.GET("", h.ListRoles)
+			roles.GET("/:id", h.GetRole)
+			roles.PUT("/:id", h.UpdateRole)
+			roles.DELETE("/:id", h.DeleteRole)
+			roles.POST("/:id/permissions", h.AssignPermissionToRole)
+			roles.DELETE("/:id/permissions/:permission", h.RemovePermissionFromRole)
+		}
 
-		// Role-Permission management
-		rbac.POST("/roles/:id/permissions/:permission_id", h.AssignPermissionToRole)
-		rbac.DELETE("/roles/:id/permissions/:permission_id", h.RemovePermissionFromRole)
-		rbac.GET("/roles/:id/permissions", h.ListRolePermissions)
+		users := rbac.Group("/users")
+		{
+			users.POST("/:id/roles", h.AssignRoleToClinician)
+			users.DELETE("/:id/roles/:roleId", h.RemoveRoleFromClinician)
+		}
 
 		// Permissions
 		rbac.GET("/permissions", h.ListPermissions)
@@ -43,11 +55,6 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 		rbac.PUT("/permissions/:id", h.UpdatePermission)
 		rbac.DELETE("/permissions/:id", h.DeletePermission)
 	}
-
-	// Clinician role assignments
-	r.POST("/clinicians/:id/roles/:role_id/organizations/:org_id", h.AssignRoleToClinician)
-	r.DELETE("/clinicians/:id/roles/:role_id/organizations/:org_id", h.RemoveRoleFromClinician)
-	r.GET("/clinicians/:id/roles/organizations/:org_id", h.ListClinicianRoles)
 }
 
 func (h *Handler) RegisterRoutesWithEvents(r *gin.RouterGroup, eventTracker *event.EventTrackerMiddleware) {
@@ -94,6 +101,7 @@ func (h *Handler) CreateRole(c *gin.Context) {
 	}
 
 	role := &model.Role{
+		ID:             uuid.New(),
 		Name:           req.Name,
 		Description:    req.Description,
 		OrganizationID: orgID,
@@ -105,12 +113,16 @@ func (h *Handler) CreateRole(c *gin.Context) {
 		return
 	}
 
-	// Set event context
-	eventCtx, _ := c.Get("eventCtx")
-	if ctx, ok := eventCtx.(*event.EventContext); ok {
-		ctx.NewData = role
-		ctx.Additional = map[string]interface{}{
-			"organization_id": role.OrganizationID,
+	// Create outbox event
+	payload, err := json.Marshal(role)
+	if err != nil {
+		log.Printf("Failed to marshal role for event: %v", err)
+	} else {
+		if err := h.outboxRepo.Create(c.Request.Context(), &model.OutboxEvent{
+			EventType: "ROLE_CREATE",
+			Payload:   payload,
+		}); err != nil {
+			log.Printf("Failed to create outbox event: %v", err)
 		}
 	}
 
@@ -133,12 +145,6 @@ func (h *Handler) GetRole(c *gin.Context) {
 	c.JSON(http.StatusOK, handler.NewSuccessResponse(role))
 }
 
-type updateRoleRequest struct {
-	Name         string `json:"name" binding:"required"`
-	Description  string `json:"description"`
-	IsSystemRole bool   `json:"is_system_role"`
-}
-
 func (h *Handler) UpdateRole(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -146,40 +152,16 @@ func (h *Handler) UpdateRole(c *gin.Context) {
 		return
 	}
 
-	var req updateRoleRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	var role model.Role
+	if err := c.ShouldBindJSON(&role); err != nil {
 		c.JSON(http.StatusBadRequest, handler.NewErrorResponse(err.Error()))
 		return
 	}
 
-	role := &model.Role{
-		Base: model.Base{
-			ID: id,
-		},
-		Name:         req.Name,
-		Description:  req.Description,
-		IsSystemRole: req.IsSystemRole,
-	}
-
-	oldRole, err := h.service.GetRole(c.Request.Context(), id)
-	if err != nil {
+	role.ID = id
+	if err := h.service.UpdateRole(c.Request.Context(), &role); err != nil {
 		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
 		return
-	}
-
-	if err := h.service.UpdateRole(c.Request.Context(), role); err != nil {
-		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
-		return
-	}
-
-	// Set event context
-	eventCtx, _ := c.Get("eventCtx")
-	if ctx, ok := eventCtx.(*event.EventContext); ok {
-		ctx.OldData = oldRole
-		ctx.NewData = role
-		ctx.Additional = map[string]interface{}{
-			"role_id": id,
-		}
 	}
 
 	c.JSON(http.StatusOK, handler.NewSuccessResponse(role))
@@ -201,13 +183,19 @@ func (h *Handler) DeleteRole(c *gin.Context) {
 }
 
 func (h *Handler) ListRoles(c *gin.Context) {
-	roles, err := h.service.ListRoles(c.Request.Context(), nil)
+	orgID, err := uuid.Parse(c.Query("organization_id"))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid organization ID"))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "success", "data": roles})
+	roles, err := h.service.ListRoles(c.Request.Context(), orgID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, handler.NewSuccessResponse(roles))
 }
 
 type createPermissionRequest struct {
@@ -312,7 +300,7 @@ func (h *Handler) AssignPermissionToRole(c *gin.Context) {
 		return
 	}
 
-	permissionID, err := uuid.Parse(c.Param("permission_id"))
+	permissionID, err := uuid.Parse(c.Param("permission"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid permission ID"))
 		return
@@ -321,15 +309,6 @@ func (h *Handler) AssignPermissionToRole(c *gin.Context) {
 	if err := h.service.AssignPermissionToRole(c.Request.Context(), roleID, permissionID); err != nil {
 		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
 		return
-	}
-
-	// Set event context
-	eventCtx, _ := c.Get("eventCtx")
-	if ctx, ok := eventCtx.(*event.EventContext); ok {
-		ctx.NewData = map[string]interface{}{
-			"role_id":       roleID,
-			"permission_id": permissionID,
-		}
 	}
 
 	c.JSON(http.StatusOK, handler.NewSuccessResponse(nil))
@@ -342,7 +321,7 @@ func (h *Handler) RemovePermissionFromRole(c *gin.Context) {
 		return
 	}
 
-	permissionID, err := uuid.Parse(c.Param("permission_id"))
+	permissionID, err := uuid.Parse(c.Param("permission"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid permission ID"))
 		return
