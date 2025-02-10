@@ -237,3 +237,16 @@ func (r *appointmentRepository) GetClinicianAppointments(ctx context.Context, us
 	}
 	return appointments, nil
 }
+
+func (r *appointmentRepository) GetClinicianSchedule(ctx context.Context, clinicianID uuid.UUID, date time.Time) ([]*model.TimeSlot, error) {
+	query := `
+		SELECT start_time, end_time 
+		FROM clinician_schedules 
+		WHERE clinician_id = $1 
+		AND date(start_time) = date($2)
+		ORDER BY start_time
+	`
+	var slots []*model.TimeSlot
+	err := r.GetDB().SelectContext(ctx, &slots, query, clinicianID, date)
+	return slots, err
+}

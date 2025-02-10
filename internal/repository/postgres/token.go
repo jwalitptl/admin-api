@@ -125,3 +125,22 @@ func (r *tokenRepository) InvalidateVerificationToken(ctx context.Context, token
 
 	return nil
 }
+
+func (r *tokenRepository) InvalidateToken(ctx context.Context, token string) error {
+	query := `
+		UPDATE user_tokens 
+		SET used_at = NOW() 
+		WHERE token = $1 
+		AND region_code = $2
+	`
+	result, err := r.GetDB().ExecContext(ctx, query, token, r.GetRegionFromContext(ctx))
+	if err != nil {
+		return fmt.Errorf("failed to invalidate token: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil || rows == 0 {
+		return fmt.Errorf("token not found or already used")
+	}
+	return nil
+}

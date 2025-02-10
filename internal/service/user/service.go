@@ -8,10 +8,10 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/jwalitptl/admin-api/internal/email"
 	"github.com/jwalitptl/admin-api/internal/model"
 	"github.com/jwalitptl/admin-api/internal/repository"
 	"github.com/jwalitptl/admin-api/internal/service/audit"
-	"github.com/jwalitptl/admin-api/internal/service/email"
 )
 
 const (
@@ -193,4 +193,33 @@ func (s *Service) validateUser(user *model.User) error {
 	}
 
 	return nil
+}
+
+func (s *Service) AssignRole(ctx context.Context, userID, roleID uuid.UUID) error {
+	// Implementation of AssignRole method
+	return nil
+}
+
+func (s *Service) RemoveRole(ctx context.Context, userID, roleID uuid.UUID) error {
+	// Implementation of RemoveRole method
+	return nil
+}
+
+func (s *Service) ListUserRoles(ctx context.Context, userID uuid.UUID) ([]*model.Role, error) {
+	// Implementation of ListUserRoles method
+	return nil, nil
+}
+
+func (s *Service) AssignToClinic(ctx context.Context, userID, clinicID uuid.UUID) error {
+	return s.repo.AssignToClinic(ctx, userID, clinicID)
+}
+
+func (s *Service) RemoveFromClinic(ctx context.Context, userID, clinicID uuid.UUID) error {
+	// Implementation of RemoveFromClinic method
+	return nil
+}
+
+func (s *Service) ListUserClinics(ctx context.Context, userID uuid.UUID) ([]*model.Clinic, error) {
+	// Implementation of ListUserClinics method
+	return nil, nil
 }

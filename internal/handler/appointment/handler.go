@@ -244,7 +244,21 @@ func (h *Handler) CreateAppointment(c *gin.Context) {
 		return
 	}
 
-	appointment, err := h.service.CreateAppointment(ctx, &req)
+	appointment := &model.Appointment{
+		Base: model.Base{
+			ID: uuid.New(),
+		},
+		ClinicID:    uuid.MustParse(req.ClinicID),
+		ClinicianID: uuid.MustParse(req.ClinicianID),
+		PatientID:   req.PatientID,
+		ServiceID:   req.ServiceID,
+		StartTime:   req.StartTime,
+		EndTime:     req.EndTime,
+		Status:      model.AppointmentStatusScheduled,
+		Notes:       req.Notes,
+	}
+
+	err := h.service.CreateAppointment(ctx, appointment)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "failed to create appointment")
@@ -499,7 +513,16 @@ func (h *Handler) UpdateAppointment(c *gin.Context) {
 		return
 	}
 
-	appointment, err := h.service.UpdateAppointment(ctx, id, &req)
+	appointment := &model.Appointment{
+		Base: model.Base{
+			ID: id,
+		},
+		StartTime: *req.StartTime,
+		EndTime:   *req.EndTime,
+		Status:    *req.Status,
+		Notes:     *req.Notes,
+	}
+	err = h.service.UpdateAppointment(ctx, appointment)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			c.JSON(http.StatusGatewayTimeout, handler.NewErrorResponse("request timeout"))
@@ -529,7 +552,7 @@ func (h *Handler) UpdateAppointment(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, handler.NewSuccessResponse(appointment))
+	c.JSON(http.StatusOK, handler.NewSuccessResponse(nil))
 }
 
 func (h *Handler) DeleteAppointment(c *gin.Context) {

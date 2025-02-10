@@ -20,3 +20,9 @@ type Message struct {
 	Type    string      `json:"type"`
 	Payload interface{} `json:"payload"`
 }
+
+type MessageBroker interface {
+	Publish(ctx context.Context, topic string, payload []byte) error
+	Subscribe(ctx context.Context, topic string, handler func([]byte) error) error
+	Close() error
+}

@@ -192,12 +192,6 @@ func (s *Service) Register(ctx context.Context, req *model.RegisterRequest) (*mo
 		log.Printf("failed to send verification email: %v", err)
 	}
 
-	// Generate verification token
-	token := uuid.New().String()
-	if err := s.tokenRepo.StoreVerificationToken(ctx, user.ID, token, time.Now().Add(verifyTokenExpiry)); err != nil {
-		return nil, fmt.Errorf("failed to store verification token: %w", err)
-	}
-
 	s.auditor.Log(ctx, user.ID, user.OrganizationID, "register", "auth", user.ID, &audit.LogOptions{
 		Metadata: map[string]interface{}{
 			"email": user.Email,
@@ -205,6 +199,14 @@ func (s *Service) Register(ctx context.Context, req *model.RegisterRequest) (*mo
 	})
 
 	return user, nil
+}
+
+func (s *Service) sendVerificationEmail(ctx context.Context, user *model.User) error {
+	token := uuid.New().String()
+	if err := s.tokenRepo.StoreVerificationToken(ctx, user.ID, token, time.Now().Add(verifyTokenExpiry)); err != nil {
+		return fmt.Errorf("failed to store verification token: %w", err)
+	}
+	return s.emailSvc.SendVerification(ctx, user.Email, token)
 }
 
 func (s *Service) ForgotPassword(ctx context.Context, email string) error {
@@ -223,7 +225,7 @@ func (s *Service) ForgotPassword(ctx context.Context, email string) error {
 	}
 
 	// Send reset email
-	if err := s.emailSvc.SendPasswordReset(user.Email, token); err != nil {
+	if err := s.emailSvc.SendPasswordReset(ctx, user.Email, token); err != nil {
 		return fmt.Errorf("failed to send reset email: %w", err)
 	}
 
@@ -277,7 +279,7 @@ func (s *Service) ResendVerification(ctx context.Context, email string) error {
 	}
 
 	// Send verification email
-	if err := s.emailSvc.SendVerification(user.Email, token); err != nil {
+	if err := s.emailSvc.SendVerification(ctx, user.Email, token); err != nil {
 		return fmt.Errorf("failed to send verification email: %w", err)
 	}
 
@@ -320,13 +322,4 @@ func (s *Service) generateTokens(user *model.User) (*model.TokenResponse, error)
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 	}, nil
-}
-
-func (s *Service) sendVerificationEmail(ctx context.Context, user *model.User) error {
-	token := uuid.New().String()
-	if err := s.tokenRepo.StoreVerificationToken(ctx, user.ID, token, time.Now().Add(verifyTokenExpiry)); err != nil {
-		return fmt.Errorf("failed to store verification token: %w", err)
-	}
-
-	return s.emailSvc.SendVerification(user.Email, token)
 }

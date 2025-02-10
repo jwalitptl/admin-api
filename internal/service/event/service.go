@@ -19,21 +19,21 @@ const (
 	eventExpiry = 24 * time.Hour
 )
 
-type EventService struct {
+type Service struct {
 	outboxRepo repository.OutboxRepository
-	broker     messaging.Broker
+	broker     messaging.MessageBroker
 	auditor    *audit.Service
 }
 
-func NewEventService(outboxRepo repository.OutboxRepository, broker messaging.Broker, auditor *audit.Service) *EventService {
-	return &EventService{
+func NewService(outboxRepo repository.OutboxRepository, broker messaging.MessageBroker, auditor *audit.Service) *Service {
+	return &Service{
 		outboxRepo: outboxRepo,
 		broker:     broker,
 		auditor:    auditor,
 	}
 }
 
-func (s *EventService) Emit(ctx context.Context, eventType string, payload interface{}) error {
+func (s *Service) Emit(ctx context.Context, eventType string, payload interface{}) error {
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal payload: %w", err)
@@ -65,7 +65,7 @@ func (s *EventService) Emit(ctx context.Context, eventType string, payload inter
 	return nil
 }
 
-func (s *EventService) ProcessPendingEvents(ctx context.Context) error {
+func (s *Service) ProcessPendingEvents(ctx context.Context) error {
 	events, err := s.outboxRepo.GetPendingEventsWithLock(ctx, 100)
 	if err != nil {
 		return fmt.Errorf("failed to get pending events: %w", err)
@@ -80,7 +80,7 @@ func (s *EventService) ProcessPendingEvents(ctx context.Context) error {
 	return nil
 }
 
-func (s *EventService) processEvent(ctx context.Context, event *model.OutboxEvent) error {
+func (s *Service) processEvent(ctx context.Context, event *model.OutboxEvent) error {
 	// Start transaction
 	tx, err := s.outboxRepo.BeginTx(ctx)
 	if err != nil {
@@ -113,7 +113,7 @@ func (s *EventService) processEvent(ctx context.Context, event *model.OutboxEven
 	return nil
 }
 
-func (s *EventService) handleProcessingError(ctx context.Context, event *model.OutboxEvent, err error) {
+func (s *Service) handleProcessingError(ctx context.Context, event *model.OutboxEvent, err error) {
 	event.RetryCount++
 	errMsg := err.Error()
 	retryAt := time.Now().Add(retryDelay * time.Duration(event.RetryCount))
@@ -148,7 +148,7 @@ func (s *EventService) handleProcessingError(ctx context.Context, event *model.O
 	})
 }
 
-func (s *EventService) CleanupProcessedEvents(ctx context.Context) error {
+func (s *Service) CleanupProcessedEvents(ctx context.Context) error {
 	cutoff := time.Now().Add(-eventExpiry)
 	count, err := s.outboxRepo.DeleteProcessedBefore(ctx, cutoff)
 	if err != nil {

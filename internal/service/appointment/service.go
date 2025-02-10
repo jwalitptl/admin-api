@@ -260,7 +260,7 @@ func (s *Service) validateAppointment(apt *model.Appointment) error {
 		return fmt.Errorf("invalid booking time: must be between %v and %v in advance", MinAdvanceBooking, MaxAdvanceBooking)
 	}
 
-	hasConflict, err := s.repo.CheckConflict(context.Background(), apt)
+	hasConflict, err := s.repo.CheckConflicts(context.Background(), apt.ClinicianID, apt.StartTime, apt.EndTime, &apt.ID)
 	if err != nil {
 		return fmt.Errorf("failed to check conflicts: %w", err)
 	}
@@ -299,4 +299,52 @@ func (s *Service) getClinicianSchedule(clinician *model.Clinician, date time.Tim
 func (s *Service) calculateAvailableSlots(schedule []*model.TimeSlot, appointments []*model.Appointment) []model.TimeSlot {
 	// Implementation of calculateAvailableSlots method
 	return nil
+}
+
+func (s *Service) CheckConflicts(ctx context.Context, apt *model.Appointment) (bool, error) {
+	hasConflict, err := s.repo.CheckConflicts(ctx, apt.ClinicianID, apt.StartTime, apt.EndTime, &apt.ID)
+	if err != nil {
+		return false, fmt.Errorf("failed to check conflicts: %w", err)
+	}
+	return hasConflict, nil
+}
+
+func (s *Service) CompleteAppointment(ctx context.Context, id uuid.UUID, notes string) error {
+	apt, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return fmt.Errorf("failed to get appointment: %w", err)
+	}
+
+	if apt.Status != model.AppointmentStatusScheduled {
+		return fmt.Errorf("can only complete scheduled appointments")
+	}
+
+	apt.Status = model.AppointmentStatusCompleted
+	apt.Notes = notes
+	apt.UpdatedAt = time.Now()
+	apt.CompletedAt = &apt.UpdatedAt
+
+	if err := s.repo.Update(ctx, apt); err != nil {
+		return fmt.Errorf("failed to complete appointment: %w", err)
+	}
+
+	s.auditor.Log(ctx, s.getCurrentUserID(ctx), apt.ClinicID, "complete", "appointment", id, &audit.LogOptions{
+		Changes: map[string]interface{}{
+			"status":       apt.Status,
+			"notes":        notes,
+			"completed_at": apt.CompletedAt,
+		},
+	})
+
+	return nil
+}
+
+func (s *Service) getCurrentUserID(ctx context.Context) uuid.UUID {
+	if ctx == nil {
+		return uuid.Nil
+	}
+	if userID, ok := ctx.Value("user_id").(uuid.UUID); ok {
+		return userID
+	}
+	return uuid.Nil
 }

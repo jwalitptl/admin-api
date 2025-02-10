@@ -182,13 +182,13 @@ func (r *medicalRecordRepository) UpdateWithAudit(ctx context.Context, record *m
 
 func (r *medicalRecordRepository) unmarshalRecordFields(record *model.MedicalRecord) error {
 	var medications []model.Medication
-	if err := json.Unmarshal(record.MedicationsJSON, &medications); err != nil {
+	if err := json.Unmarshal([]byte(record.MedicationsJSON), &medications); err != nil {
 		return fmt.Errorf("failed to unmarshal medications: %w", err)
 	}
 	record.Medications = medications
 
 	var attachments []model.Attachment
-	if err := json.Unmarshal(record.AttachmentsJSON, &attachments); err != nil {
+	if err := json.Unmarshal([]byte(record.AttachmentsJSON), &attachments); err != nil {
 		return fmt.Errorf("failed to unmarshal attachments: %w", err)
 	}
 	record.Attachments = attachments

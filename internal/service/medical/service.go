@@ -197,6 +197,9 @@ func (s *Service) isValidAccessLevel(level string) bool {
 }
 
 func (s *Service) getCurrentUserID(ctx context.Context) uuid.UUID {
+	if ctx == nil {
+		return uuid.Nil
+	}
 	if userID, ok := ctx.Value("user_id").(uuid.UUID); ok {
 		return userID
 	}

@@ -38,6 +38,7 @@ type (
 		FindConflictingAppointments(ctx context.Context, staffID uuid.UUID, start, end time.Time) ([]*model.Appointment, error)
 		CheckConflicts(ctx context.Context, userID uuid.UUID, startTime, endTime time.Time, excludeID *uuid.UUID) (bool, error)
 		GetClinicianAppointments(ctx context.Context, userID uuid.UUID, startDate, endDate time.Time) ([]*model.Appointment, error)
+		GetClinicianSchedule(ctx context.Context, clinicianID uuid.UUID, date time.Time) ([]*model.TimeSlot, error)
 	}
 
 	PatientRepository interface {
@@ -56,12 +57,24 @@ type (
 		GetRole(ctx context.Context, id uuid.UUID) (*model.Role, error)
 		UpdateRole(ctx context.Context, role *model.Role) error
 		DeleteRole(ctx context.Context, id uuid.UUID) error
-		ListRoles(ctx context.Context, organizationID *uuid.UUID) ([]*model.Role, error)
-		AssignRole(ctx context.Context, userID, roleID uuid.UUID) error
-		RemoveRole(ctx context.Context, userID, roleID uuid.UUID) error
+		ListRoles(ctx context.Context, orgID uuid.UUID) ([]*model.Role, error)
+		AssignRoleToUser(ctx context.Context, userID, roleID uuid.UUID) error
+		RemoveRoleFromUser(ctx context.Context, userID, roleID uuid.UUID) error
 		GetUserRoles(ctx context.Context, userID uuid.UUID) ([]*model.Role, error)
 		GetRolePermissions(ctx context.Context, roleID uuid.UUID) ([]*model.Permission, error)
 		HasPermission(ctx context.Context, userID uuid.UUID, permission string, organizationID uuid.UUID) (bool, error)
+		AddPermissionToRole(ctx context.Context, roleID uuid.UUID, permission string) error
+		RemovePermissionFromRole(ctx context.Context, roleID, permissionID uuid.UUID) error
+		AssignPermissionToRole(ctx context.Context, roleID, permissionID uuid.UUID) error
+		AssignRoleToClinician(ctx context.Context, clinicianID, roleID, orgID uuid.UUID) error
+		RemoveRoleFromClinician(ctx context.Context, clinicianID, roleID, orgID uuid.UUID) error
+		ListRolePermissions(ctx context.Context, roleID uuid.UUID) ([]*model.Permission, error)
+		ListClinicianRoles(ctx context.Context, clinicianID, orgID uuid.UUID) ([]*model.Role, error)
+		CreatePermission(ctx context.Context, permission *model.Permission) error
+		GetPermission(ctx context.Context, id uuid.UUID) (*model.Permission, error)
+		UpdatePermission(ctx context.Context, permission *model.Permission) error
+		DeletePermission(ctx context.Context, id uuid.UUID) error
+		ListPermissions(ctx context.Context) ([]*model.Permission, error)
 	}
 
 	AuditRepository interface {
@@ -70,6 +83,7 @@ type (
 		ListWithPagination(ctx context.Context, filters map[string]interface{}) ([]*model.AuditLog, int64, error)
 		GetAggregateStats(ctx context.Context, filters map[string]interface{}) (*model.AggregateStats, error)
 		Cleanup(ctx context.Context, before time.Time) (int64, error)
+		DeleteBefore(ctx context.Context, cutoff time.Time) error
 	}
 
 	TokenRepository interface {
@@ -116,5 +130,30 @@ type (
 		UpdateStatusTx(ctx context.Context, tx *sql.Tx, id uuid.UUID, status string, errorMessage *string, retryAt *time.Time) error
 		MoveToDeadLetter(ctx context.Context, tx *sql.Tx, event *model.OutboxEvent) error
 		DeleteProcessedBefore(ctx context.Context, before time.Time) (int64, error)
+	}
+
+	MedicalRecordRepository interface {
+		Get(ctx context.Context, id uuid.UUID) (*model.MedicalRecord, error)
+		List(ctx context.Context, patientID uuid.UUID, filters *model.RecordFilters) ([]*model.MedicalRecord, error)
+		CreateWithAudit(ctx context.Context, record *model.MedicalRecord) error
+		UpdateWithAudit(ctx context.Context, record *model.MedicalRecord) error
+		Delete(ctx context.Context, id uuid.UUID) error
+	}
+
+	NotificationRepository interface {
+		Create(ctx context.Context, notification *model.Notification) error
+		Update(ctx context.Context, notification *model.Notification) error
+	}
+
+	ClinicianRepository interface {
+		Get(ctx context.Context, id uuid.UUID) (*model.Clinician, error)
+	}
+
+	PermissionRepository interface {
+		Create(ctx context.Context, permission *model.Permission) error
+		Get(ctx context.Context, id uuid.UUID) (*model.Permission, error)
+		Update(ctx context.Context, permission *model.Permission) error
+		Delete(ctx context.Context, id uuid.UUID) error
+		List(ctx context.Context, orgID uuid.UUID) ([]*model.Permission, error)
 	}
 )

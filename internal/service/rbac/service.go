@@ -64,7 +64,11 @@ func (s *Service) CreateRole(ctx context.Context, role *model.Role) error {
 		return fmt.Errorf("failed to create role: %w", err)
 	}
 
-	s.auditor.Log(ctx, s.getCurrentUserID(ctx), role.OrganizationID, "create", "role", role.ID, &audit.LogOptions{
+	orgID := uuid.Nil
+	if role.OrganizationID != nil {
+		orgID = *role.OrganizationID
+	}
+	s.auditor.Log(ctx, s.getCurrentUserID(ctx), orgID, "create", "role", role.ID, &audit.LogOptions{
 		Changes: role,
 	})
 
@@ -77,7 +81,11 @@ func (s *Service) GetRole(ctx context.Context, id uuid.UUID) (*model.Role, error
 		return nil, fmt.Errorf("failed to get role: %w", err)
 	}
 
-	s.auditor.Log(ctx, s.getCurrentUserID(ctx), role.OrganizationID, "read", "role", id, nil)
+	orgID := uuid.Nil
+	if role.OrganizationID != nil {
+		orgID = *role.OrganizationID
+	}
+	s.auditor.Log(ctx, s.getCurrentUserID(ctx), orgID, "read", "role", id, nil)
 	return role, nil
 }
 
@@ -95,7 +103,11 @@ func (s *Service) UpdateRole(ctx context.Context, role *model.Role) error {
 		return fmt.Errorf("failed to update role: %w", err)
 	}
 
-	s.auditor.Log(ctx, s.getCurrentUserID(ctx), role.OrganizationID, "update", "role", role.ID, &audit.LogOptions{
+	orgID := uuid.Nil
+	if role.OrganizationID != nil {
+		orgID = *role.OrganizationID
+	}
+	s.auditor.Log(ctx, s.getCurrentUserID(ctx), orgID, "update", "role", role.ID, &audit.LogOptions{
 		Changes: role,
 	})
 
@@ -116,7 +128,11 @@ func (s *Service) DeleteRole(ctx context.Context, id uuid.UUID) error {
 		return fmt.Errorf("failed to delete role: %w", err)
 	}
 
-	s.auditor.Log(ctx, s.getCurrentUserID(ctx), role.OrganizationID, "delete", "role", id, nil)
+	orgID := uuid.Nil
+	if role.OrganizationID != nil {
+		orgID = *role.OrganizationID
+	}
+	s.auditor.Log(ctx, s.getCurrentUserID(ctx), orgID, "delete", "role", id, nil)
 	return nil
 }
 
@@ -138,7 +154,11 @@ func (s *Service) AssignRoleToUser(ctx context.Context, userID, roleID uuid.UUID
 		return fmt.Errorf("failed to assign role: %w", err)
 	}
 
-	s.auditor.Log(ctx, s.getCurrentUserID(ctx), role.OrganizationID, "assign_role", "user", userID, &audit.LogOptions{
+	orgID := uuid.Nil
+	if role.OrganizationID != nil {
+		orgID = *role.OrganizationID
+	}
+	s.auditor.Log(ctx, s.getCurrentUserID(ctx), orgID, "assign_role", "user", userID, &audit.LogOptions{
 		Changes: map[string]interface{}{
 			"role_id": roleID,
 		},
@@ -157,7 +177,11 @@ func (s *Service) RemoveRoleFromUser(ctx context.Context, userID, roleID uuid.UU
 		return fmt.Errorf("failed to remove role: %w", err)
 	}
 
-	s.auditor.Log(ctx, s.getCurrentUserID(ctx), role.OrganizationID, "remove_role", "user", userID, &audit.LogOptions{
+	orgID := uuid.Nil
+	if role.OrganizationID != nil {
+		orgID = *role.OrganizationID
+	}
+	s.auditor.Log(ctx, s.getCurrentUserID(ctx), orgID, "remove_role", "user", userID, &audit.LogOptions{
 		Changes: map[string]interface{}{
 			"role_id": roleID,
 		},

@@ -113,33 +113,15 @@ func (r *rbacRepository) DeleteRole(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (r *rbacRepository) ListRoles(ctx context.Context, organizationID *uuid.UUID) ([]*model.Role, error) {
-	var query string
-	var args []interface{}
-
-	if organizationID != nil {
-		query = `
-			SELECT r.id, r.name, r.description, r.is_system_role, r.created_at, r.updated_at
-			FROM roles r
-			JOIN organization_roles or ON r.id = or.role_id
-			WHERE or.organization_id = $1
-			ORDER BY r.created_at DESC
-		`
-		args = append(args, *organizationID)
-	} else {
-		query = `
-			SELECT id, name, description, is_system_role, created_at, updated_at
-			FROM roles
-			ORDER BY created_at DESC
-		`
-	}
-
+func (r *rbacRepository) ListRoles(ctx context.Context, organizationID uuid.UUID) ([]*model.Role, error) {
+	query := `
+		SELECT * FROM roles 
+		WHERE organization_id = $1 AND deleted_at IS NULL
+		ORDER BY name
+	`
 	var roles []*model.Role
-	err := r.db.SelectContext(ctx, &roles, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list roles: %w", err)
-	}
-	return roles, nil
+	err := r.db.SelectContext(ctx, &roles, query, organizationID)
+	return roles, err
 }
 
 func (r *rbacRepository) CreatePermission(ctx context.Context, permission *model.Permission) error {
@@ -395,4 +377,31 @@ func (r *rbacRepository) GetRolePermissions(ctx context.Context, roleID uuid.UUI
 	}
 
 	return permissions, nil
+}
+
+func (r *rbacRepository) AddPermissionToRole(ctx context.Context, roleID uuid.UUID, permission string) error {
+	query := `
+		INSERT INTO role_permissions (role_id, permission)
+		VALUES ($1, $2)
+	`
+	_, err := r.db.ExecContext(ctx, query, roleID, permission)
+	return err
+}
+
+func (r *rbacRepository) AssignRoleToUser(ctx context.Context, userID, roleID uuid.UUID) error {
+	query := `
+		INSERT INTO user_roles (user_id, role_id)
+		VALUES ($1, $2)
+	`
+	_, err := r.db.ExecContext(ctx, query, userID, roleID)
+	return err
+}
+
+func (r *rbacRepository) RemoveRoleFromUser(ctx context.Context, userID, roleID uuid.UUID) error {
+	query := `
+		DELETE FROM user_roles
+		WHERE user_id = $1 AND role_id = $2
+	`
+	_, err := r.db.ExecContext(ctx, query, userID, roleID)
+	return err
 }

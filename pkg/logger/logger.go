@@ -83,3 +83,8 @@ func (l *Logger) Fatal(err error, msg string, fields ...interface{}) {
 func (l *Logger) Debug(msg string, fields ...interface{}) {
 	l.zl.Debug().Fields(fields).Msg(msg)
 }
+
+// Add Warn method to Logger
+func (l *Logger) Warn(msg string, fields ...interface{}) {
+	l.zl.Warn().Fields(fields).Msg(msg)
+}

@@ -20,15 +20,24 @@ func NewService(repo repository.AuditRepository) *Service {
 }
 
 type LogOptions struct {
-	Changes     interface{}
-	Metadata    interface{}
-	IPAddress   string
-	UserAgent   string
-	AccessLevel string
+	Changes      interface{}
+	Metadata     interface{}
+	IPAddress    string
+	UserAgent    string
+	AccessLevel  string
+	AccessReason string
 }
 
 // Log creates an audit log entry
 func (s *Service) Log(ctx context.Context, userID, orgID uuid.UUID, action, entityType string, entityID uuid.UUID, opts *LogOptions) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if opts == nil {
+		opts = &LogOptions{}
+	}
+
 	var changes, metadata json.RawMessage
 	var err error
 
@@ -87,7 +96,7 @@ func (s *Service) GetAggregateStats(ctx context.Context, filters map[string]inte
 func (s *Service) LogEmergencyAccess(ctx context.Context, log *model.AuditLog) error {
 	// Additional emergency logging logic
 	log.EntityType = "emergency_access"
-	return s.repo.CreateAuditLog(ctx, log)
+	return s.repo.Create(ctx, log)
 }
 
 func (s *Service) Cleanup(ctx context.Context, before time.Time) (int64, error) {

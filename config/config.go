@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jwalitptl/admin-api/pkg/messaging/redis"
+	"github.com/jwalitptl/admin-api/pkg/worker"
 	"github.com/spf13/viper"
 )
 
@@ -70,6 +72,22 @@ type Config struct {
 		PrometheusEnabled bool
 		MetricsPath       string
 	}
+	Outbox OutboxConfig `yaml:"outbox"`
+}
+
+type OutboxConfig struct {
+	BatchSize     int           `yaml:"batch_size"`
+	PollInterval  time.Duration `yaml:"poll_interval"`
+	RetryAttempts int           `yaml:"retry_attempts"`
+	RetryDelay    time.Duration `yaml:"retry_delay"`
+}
+
+type RedisConfig struct {
+	URL          string        `yaml:"url"`
+	MaxRetries   int           `yaml:"max_retries"`
+	RetryBackoff time.Duration `yaml:"retry_backoff"`
+	PoolSize     int           `yaml:"pool_size"`
+	MinIdleConns int           `yaml:"min_idle_conns"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -133,4 +151,24 @@ func getCurrentDir() string {
 		return err.Error()
 	}
 	return dir
+}
+
+// Add conversion methods to convert config types
+func (c *OutboxConfig) ToWorkerConfig() worker.OutboxProcessorConfig {
+	return worker.OutboxProcessorConfig{
+		BatchSize:     c.BatchSize,
+		PollInterval:  c.PollInterval,
+		RetryAttempts: c.RetryAttempts,
+		RetryDelay:    c.RetryDelay,
+	}
+}
+
+func (c *RedisConfig) ToBrokerConfig() redis.Config {
+	return redis.Config{
+		URL:          c.URL,
+		MaxRetries:   c.MaxRetries,
+		RetryBackoff: c.RetryBackoff,
+		PoolSize:     c.PoolSize,
+		MinIdleConns: c.MinIdleConns,
+	}
 }

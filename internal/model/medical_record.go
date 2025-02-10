@@ -10,6 +10,7 @@ import (
 type MedicalRecord struct {
 	Base
 	PatientID       uuid.UUID       `db:"patient_id" json:"patient_id"`
+	OrganizationID  uuid.UUID       `db:"organization_id" json:"organization_id"`
 	Type            string          `db:"type" json:"type"`
 	Description     string          `db:"description" json:"description"`
 	Diagnosis       json.RawMessage `db:"diagnosis" json:"diagnosis"`

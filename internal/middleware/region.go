@@ -132,17 +132,14 @@ func (m *RegionMiddleware) getRegionFromIP(ip string) string {
 	}
 
 	// Lookup region
-	region := m.regionSvc.GetRegionFromIP(ip)
+	region, err := m.regionSvc.GetRegionFromIP(context.Background(), ip)
+	if err != nil {
+		log.Warn().Err(err).Str("ip", ip).Msg("Failed to detect region from IP")
+		return ""
+	}
 
 	// Cache the result
 	m.cache.Set("ip:"+ip, region, cache.DefaultExpiration)
-
-	// Add error handling in getRegionFromIP
-	if region == "" {
-		log.Warn().
-			Str("ip", ip).
-			Msg("Failed to detect region from IP")
-	}
 
 	return region
 }

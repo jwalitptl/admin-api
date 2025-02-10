@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jwalitptl/admin-api/pkg/circuitbreaker"
+	"github.com/jwalitptl/admin-api/pkg/logger"
 	"github.com/jwalitptl/admin-api/pkg/messaging"
 	"github.com/redis/go-redis/v9"
 )
@@ -14,13 +15,28 @@ import (
 type RedisBroker struct {
 	client *redis.Client
 	cb     *circuitbreaker.CircuitBreaker
+	logger *logger.Logger
 }
 
-func NewRedisBroker(url string) (messaging.Broker, error) {
-	opts, err := redis.ParseURL(url)
+type Config struct {
+	URL          string
+	MaxRetries   int
+	RetryBackoff time.Duration
+	PoolSize     int
+	MinIdleConns int
+}
+
+func NewRedisBroker(config Config, logger *logger.Logger) (messaging.Broker, error) {
+	opts, err := redis.ParseURL(config.URL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse Redis URL: %w", err)
 	}
+
+	// Configure connection pooling
+	opts.MaxRetries = config.MaxRetries
+	opts.MinRetryBackoff = config.RetryBackoff
+	opts.PoolSize = config.PoolSize
+	opts.MinIdleConns = config.MinIdleConns
 
 	cb := circuitbreaker.NewCircuitBreaker(circuitbreaker.Settings{
 		Name:        "redis-broker",
@@ -30,7 +46,17 @@ func NewRedisBroker(url string) (messaging.Broker, error) {
 	})
 
 	client := redis.NewClient(opts)
-	return &RedisBroker{client: client, cb: cb}, nil
+
+	// Test connection
+	if err := client.Ping(context.Background()).Err(); err != nil {
+		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
+	}
+
+	return &RedisBroker{
+		client: client,
+		cb:     cb,
+		logger: logger,
+	}, nil
 }
 
 func (b *RedisBroker) Publish(ctx context.Context, channel string, message interface{}) error {
@@ -43,18 +69,25 @@ func (b *RedisBroker) Publish(ctx context.Context, channel string, message inter
 
 func (b *RedisBroker) Subscribe(ctx context.Context, channel string) (<-chan []byte, error) {
 	pubsub := b.client.Subscribe(ctx, channel)
-	msgChan := make(chan []byte)
+	msgChan := make(chan []byte, 100)
 
 	go func() {
-		defer pubsub.Close()
-		defer close(msgChan)
+		defer func() {
+			pubsub.Close()
+			close(msgChan)
+		}()
 
 		for {
-			msg, err := pubsub.ReceiveMessage(ctx)
-			if err != nil {
+			select {
+			case <-ctx.Done():
 				return
+			default:
+				msg, err := pubsub.ReceiveMessage(ctx)
+				if err != nil {
+					continue
+				}
+				msgChan <- []byte(msg.Payload)
 			}
-			msgChan <- []byte(msg.Payload)
 		}
 	}()
 

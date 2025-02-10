@@ -53,7 +53,13 @@ func (h *Handler) RegisterRoutesWithEvents(r *gin.RouterGroup, eventTracker *eve
 }
 
 func (h *Handler) ListPermissions(c *gin.Context) {
-	permissions, err := h.service.ListPermissions(c.Request.Context())
+	orgID, err := uuid.Parse(c.Query("organization_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid organization ID"})
+		return
+	}
+
+	permissions, err := h.service.ListPermissions(c.Request.Context(), orgID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

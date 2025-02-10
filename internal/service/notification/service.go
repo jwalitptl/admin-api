@@ -21,21 +21,21 @@ const (
 	channelSMS   = "sms"
 	channelPush  = "push"
 	channelInApp = "in_app"
-
-	priorityHigh   = "high"
-	priorityNormal = "normal"
-	priorityLow    = "low"
 )
 
-type Service struct {
+type Service interface {
+	Send(ctx context.Context, notification *model.Notification) error
+}
+
+type service struct {
 	repo     repository.NotificationRepository
-	emailSvc *email.Service
+	emailSvc email.Service
 	broker   messaging.Broker
 	auditor  *audit.Service
 }
 
-func NewService(repo repository.NotificationRepository, emailSvc *email.Service, broker messaging.Broker, auditor *audit.Service) *Service {
-	return &Service{
+func NewService(repo repository.NotificationRepository, emailSvc email.Service, broker messaging.Broker, auditor *audit.Service) Service {
+	return &service{
 		repo:     repo,
 		emailSvc: emailSvc,
 		broker:   broker,
@@ -43,7 +43,7 @@ func NewService(repo repository.NotificationRepository, emailSvc *email.Service,
 	}
 }
 
-func (s *Service) Send(ctx context.Context, notification *model.Notification) error {
+func (s *service) Send(ctx context.Context, notification *model.Notification) error {
 	if err := s.validateNotification(notification); err != nil {
 		return fmt.Errorf("invalid notification: %w", err)
 	}
@@ -67,7 +67,10 @@ func (s *Service) Send(ctx context.Context, notification *model.Notification) er
 	return nil
 }
 
-func (s *Service) processNotification(ctx context.Context, notification *model.Notification) {
+func (s *service) processNotification(ctx context.Context, notification *model.Notification) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var err error
 	switch notification.Channel {
 	case channelEmail:
@@ -108,21 +111,21 @@ func (s *Service) processNotification(ctx context.Context, notification *model.N
 	})
 }
 
-func (s *Service) sendEmail(ctx context.Context, notification *model.Notification) error {
+func (s *service) sendEmail(ctx context.Context, notification *model.Notification) error {
 	return s.emailSvc.SendCustom(ctx, notification.Recipient, notification.Subject, notification.Content)
 }
 
-func (s *Service) sendSMS(ctx context.Context, notification *model.Notification) error {
+func (s *service) sendSMS(_ context.Context, _ *model.Notification) error {
 	// Implement SMS sending logic
 	return fmt.Errorf("SMS sending not implemented")
 }
 
-func (s *Service) sendPush(ctx context.Context, notification *model.Notification) error {
+func (s *service) sendPush(_ context.Context, _ *model.Notification) error {
 	// Implement push notification logic
 	return fmt.Errorf("push notifications not implemented")
 }
 
-func (s *Service) sendInApp(ctx context.Context, notification *model.Notification) error {
+func (s *service) sendInApp(ctx context.Context, notification *model.Notification) error {
 	event := &model.NotificationEvent{
 		ID:             uuid.New(),
 		NotificationID: notification.ID,
@@ -135,7 +138,7 @@ func (s *Service) sendInApp(ctx context.Context, notification *model.Notificatio
 	return s.broker.Publish(ctx, "notifications", event)
 }
 
-func (s *Service) handleError(ctx context.Context, notification *model.Notification, err error) {
+func (s *service) handleError(ctx context.Context, notification *model.Notification, err error) {
 	notification.RetryCount++
 	notification.LastError = err.Error()
 	notification.Status = model.NotificationStatusFailed
@@ -166,7 +169,7 @@ func (s *Service) handleError(ctx context.Context, notification *model.Notificat
 	})
 }
 
-func (s *Service) validateNotification(notification *model.Notification) error {
+func (s *service) validateNotification(notification *model.Notification) error {
 	if notification.UserID == uuid.Nil {
 		return fmt.Errorf("user ID is required")
 	}

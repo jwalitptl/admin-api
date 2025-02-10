@@ -95,7 +95,7 @@ func (h *Handler) UpdateAccount(c *gin.Context) {
 		return
 	}
 
-	var user model.User
+	var user model.Account
 	if err := c.ShouldBindJSON(&user); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -126,21 +126,16 @@ func (h *Handler) DeleteAccount(c *gin.Context) {
 }
 
 func (h *Handler) ListAccounts(c *gin.Context) {
-	var filters model.UserFilters
+	var filters model.AccountFilters
 
 	// Parse organization ID if provided
 	if orgID := c.Query("organization_id"); orgID != "" {
-		id, err := uuid.Parse(orgID)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid organization_id format"})
-			return
-		}
-		filters.OrganizationID = id
+		filters.Search = orgID // or handle differently based on AccountFilters structure
 	}
 
-	filters.Type = c.Query("type")
 	filters.Status = c.Query("status")
-	filters.SearchTerm = c.Query("search")
+	filters.Plan = c.Query("plan")
+	filters.Search = c.Query("search")
 
 	users, err := h.service.ListAccounts(c.Request.Context(), &filters)
 	if err != nil {

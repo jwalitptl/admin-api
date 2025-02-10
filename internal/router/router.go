@@ -107,7 +107,7 @@ func NewRouter(
 
 	// Configure rate limiter
 	rateLimiter := middleware.NewRateLimiter(middleware.RateLimiterConfig{
-		Rate:  config.RateLimit,
+		RPS:   float64(config.RateLimit),
 		Burst: config.RateBurst,
 	})
 	engine.Use(rateLimiter.RateLimit())

@@ -6,10 +6,10 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 
-	"github.com/jwalitptl/admin-api/pkg/config"
+	"github.com/jwalitptl/admin-api/pkg/database"
 )
 
-func NewDB(cfg config.DatabaseConfig) (*sqlx.DB, error) {
+func NewDB(cfg database.Config) (*sqlx.DB, error) {
 	dsn := fmt.Sprintf(
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
 		cfg.Host,

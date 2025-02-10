@@ -183,7 +183,13 @@ func (h *Handler) DeleteRole(c *gin.Context) {
 }
 
 func (h *Handler) ListRoles(c *gin.Context) {
-	roles, err := h.service.ListRoles(c.Request.Context())
+	orgID, err := uuid.Parse(c.Query("organization_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid organization ID"))
+		return
+	}
+
+	roles, err := h.service.ListRoles(c.Request.Context(), orgID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
 		return

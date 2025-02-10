@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jmoiron/sqlx"
 
 	"github.com/jwalitptl/admin-api/internal/model"
+	"github.com/jwalitptl/admin-api/internal/repository"
 )
 
 type OutboxRepository interface {
@@ -20,14 +20,15 @@ type OutboxRepository interface {
 	BeginTx(ctx context.Context) (*sql.Tx, error)
 	UpdateStatusTx(ctx context.Context, tx *sql.Tx, id uuid.UUID, status string, errorMessage *string, retryAt *time.Time) error
 	MoveToDeadLetter(ctx context.Context, tx *sql.Tx, evt *model.OutboxEvent) error
+	DeleteProcessedBefore(ctx context.Context, before time.Time) (int64, error)
 }
 
 type outboxRepository struct {
-	db *sqlx.DB
+	BaseRepository
 }
 
-func NewOutboxRepository(db *sqlx.DB) OutboxRepository {
-	return &outboxRepository{db: db}
+func NewOutboxRepository(base BaseRepository) repository.OutboxRepository {
+	return &outboxRepository{base}
 }
 
 func (r *outboxRepository) Create(ctx context.Context, event *model.OutboxEvent) error {
@@ -132,4 +133,18 @@ func (r *outboxRepository) MoveToDeadLetter(ctx context.Context, tx *sql.Tx, evt
 	_, err := tx.ExecContext(ctx, query, evt.ID, evt.EventType, evt.Payload,
 		evt.ErrorMessage, evt.RetryCount, evt.RetryAt)
 	return err
+}
+
+func (r *outboxRepository) DeleteProcessedBefore(ctx context.Context, before time.Time) (int64, error) {
+	query := `
+		DELETE FROM outbox_events
+		WHERE status = 'processed'
+		AND processed_at < $1
+	`
+	result, err := r.db.ExecContext(ctx, query, before)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete processed events: %w", err)
+	}
+
+	return result.RowsAffected()
 }

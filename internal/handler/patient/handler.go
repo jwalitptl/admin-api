@@ -107,7 +107,7 @@ func (h *Handler) CreatePatient(c *gin.Context) {
 		Status:      req.Status,
 	}
 
-	patient, err = h.service.CreatePatient(c.Request.Context(), patient)
+	err = h.service.CreatePatient(c.Request.Context(), patient)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
 		return

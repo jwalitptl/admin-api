@@ -19,7 +19,6 @@ type Appointment struct {
 	Base
 	ClinicID     uuid.UUID         `db:"clinic_id" json:"clinic_id"`
 	ClinicianID  uuid.UUID         `db:"clinician_id" json:"clinician_id"`
-	UserID       uuid.UUID         `db:"user_id" json:"user_id"`
 	PatientID    uuid.UUID         `db:"patient_id" json:"patient_id"`
 	ServiceID    uuid.UUID         `db:"service_id" json:"service_id"`
 	StartTime    time.Time         `db:"start_time" json:"start_time"`
@@ -27,14 +26,15 @@ type Appointment struct {
 	Status       AppointmentStatus `db:"status" json:"status"`
 	Notes        string            `db:"notes" json:"notes,omitempty"`
 	CancelReason *string           `json:"cancel_reason,omitempty" db:"cancel_reason"`
-	CreatedAt    time.Time         `db:"created_at" json:"created_at"`
-	UpdatedAt    time.Time         `db:"updated_at" json:"updated_at"`
+	CompletedAt  *time.Time        `db:"completed_at" json:"completed_at,omitempty"`
 }
 
 type CreateAppointmentRequest struct {
 	ClinicID        string    `json:"clinic_id" validate:"required,uuid"`
 	PatientID       uuid.UUID `json:"patient_id" validate:"required,uuid"`
 	ClinicianID     string    `json:"clinician_id" validate:"required,uuid"`
+	ServiceID       uuid.UUID `json:"service_id" validate:"required,uuid"`
+	StaffID         uuid.UUID `json:"staff_id" validate:"required,uuid"`
 	StartTime       time.Time `json:"start_time" validate:"required,gt=now"`
 	EndTime         time.Time `json:"end_time" validate:"required,gtfield=StartTime"`
 	AppointmentType string    `json:"appointment_type" validate:"required,oneof=regular followup emergency"`

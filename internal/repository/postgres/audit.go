@@ -226,3 +226,9 @@ func (r *auditRepository) GetAggregateStats(ctx context.Context, filters map[str
 
 	return stats, nil
 }
+
+func (r *auditRepository) DeleteBefore(ctx context.Context, cutoff time.Time) error {
+	query := `DELETE FROM audit_logs WHERE created_at < $1`
+	_, err := r.GetDB().ExecContext(ctx, query, cutoff)
+	return err
+}

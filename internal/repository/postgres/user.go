@@ -288,3 +288,21 @@ func (r *userRepository) ListUserRoles(ctx context.Context, userID uuid.UUID) ([
 	}
 	return roles, nil
 }
+
+func (r *userRepository) UpdateEmailVerified(ctx context.Context, userID uuid.UUID, verified bool) error {
+	query := `
+		UPDATE users 
+		SET email_verified = $1, updated_at = NOW() 
+		WHERE id = $2
+	`
+	result, err := r.db.ExecContext(ctx, query, verified, userID)
+	if err != nil {
+		return fmt.Errorf("failed to update email verification status: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil || rows == 0 {
+		return fmt.Errorf("user not found")
+	}
+	return nil
+}

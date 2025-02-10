@@ -1,7 +1,0 @@
-email:
-  smtp_host: smtp.gmail.com
-  smtp_port: 587
-  smtp_username: your-email@gmail.com
-  smtp_password: ${SMTP_PASSWORD}
-  from_email: noreply@yourapp.com
-  from_name: Your App Name 

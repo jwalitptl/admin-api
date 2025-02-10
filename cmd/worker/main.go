@@ -11,12 +11,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jwalitptl/admin-api/config"
 	"github.com/jwalitptl/admin-api/internal/model"
 	"github.com/jwalitptl/admin-api/internal/repository/postgres"
-	"github.com/jwalitptl/admin-api/pkg/config"
+	"github.com/jwalitptl/admin-api/pkg/logger"
 	"github.com/jwalitptl/admin-api/pkg/messaging"
 	"github.com/jwalitptl/admin-api/pkg/messaging/redis"
-	"github.com/kelseyhightower/envconfig"
+	"github.com/jwalitptl/admin-api/pkg/worker"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/zap"
@@ -108,104 +109,51 @@ func setupHealthCheck(logger *zap.Logger) {
 }
 
 func main() {
+	// Load config
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to load config")
+	}
+
 	// Initialize logger
-	logger, err := zap.NewProduction()
+	logger := logger.NewLogger(&logger.Config{
+		Level:      logger.InfoLevel,
+		TimeFormat: time.RFC3339,
+		Output:     os.Stdout,
+	})
+
+	// Initialize Redis broker
+	broker, err := redis.NewRedisBroker(cfg.Redis.ToBrokerConfig(), logger)
 	if err != nil {
-		log.Fatalf("Failed to initialize logger: %v", err)
+		logger.Fatal(err, "Failed to create Redis broker")
 	}
-	defer logger.Sync()
-
-	// Worker configuration from env
-	workerConfig := struct {
-		NumWorkers     int           `envconfig:"WORKER_COUNT" default:"3"`
-		BatchSize      int           `envconfig:"BATCH_SIZE" default:"100"`
-		MaxRetries     int           `envconfig:"MAX_RETRIES" default:"3"`
-		RetryDelay     time.Duration `envconfig:"RETRY_DELAY" default:"5s"`
-		ProcessingFreq time.Duration `envconfig:"PROCESSING_FREQ" default:"5s"`
-	}{}
-
-	if err := envconfig.Process("", &workerConfig); err != nil {
-		logger.Fatal("Failed to load worker config", zap.Error(err))
-	}
-
-	// Load configuration
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		logger.Fatal("Failed to load config", zap.Error(err))
-	}
-
-	// Initialize DB with connection pool
-	db, err := postgres.NewDB(cfg.Database)
-	if err != nil {
-		logger.Fatal("Failed to connect to database", zap.Error(err))
-	}
-	defer db.Close()
-
-	// Initialize Redis with connection pool
-	redisClient, err := redis.NewRedisBroker(cfg.Redis.URL)
-	if err != nil {
-		logger.Fatal("Failed to connect to Redis", zap.Error(err))
-	}
-	defer redisClient.Close()
+	defer broker.Close()
 
 	// Initialize repositories
 	outboxRepo := postgres.NewOutboxRepository(db)
 
-	// Create worker pool
-	numWorkers := workerConfig.NumWorkers
-	workers := make([]*EventWorker, numWorkers)
-	var wg sync.WaitGroup
+	// Initialize and start outbox processor
+	processor := worker.NewOutboxProcessor(
+		outboxRepo,
+		broker,
+		cfg.Outbox.ToWorkerConfig(),
+		logger,
+	)
 
-	// Context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Setup signal handling
+	// Handle shutdown signals
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Start workers
-	for i := 0; i < numWorkers; i++ {
-		worker := NewEventWorker(outboxRepo, redisClient, logger)
-		workers[i] = worker
-		wg.Add(1)
-
-		go func(w *EventWorker) {
-			defer wg.Done()
-			w.Start(ctx)
-		}(worker)
-	}
-
-	// Shutdown timeout
-	const shutdownTimeout = 30 * time.Second
-
-	// Handle shutdown
 	go func() {
-		sig := <-sigChan
-		logger.Info("Received shutdown signal", zap.String("signal", sig.String()))
-
-		// Create shutdown context with timeout
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-
+		<-sigChan
+		logger.Info("Shutting down...")
 		cancel()
-
-		// Wait for workers with timeout
-		done := make(chan struct{})
-		go func() {
-			wg.Wait()
-			close(done)
-		}()
-
-		select {
-		case <-done:
-			logger.Info("All workers shut down gracefully")
-		case <-shutdownCtx.Done():
-			logger.Warn("Shutdown timed out, forcing exit")
-		}
 	}()
 
-	setupHealthCheck(logger)
+	processor.Start(ctx)
 }
 
 func (w *EventWorker) Start(ctx context.Context) {

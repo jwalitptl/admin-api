@@ -141,7 +141,7 @@ func (h *Handler) GetUser(c *gin.Context) {
 }
 
 func (h *Handler) ListUsers(c *gin.Context) {
-	filters := make(map[string]interface{})
+	var filters model.UserFilters
 
 	// Required organization filter
 	orgID, err := uuid.Parse(c.Query("organization_id"))
@@ -149,17 +149,17 @@ func (h *Handler) ListUsers(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid organization ID"})
 		return
 	}
-	filters["organization_id"] = orgID
+	filters.OrganizationID = orgID
 
 	// Optional filters
 	if userType := c.Query("type"); userType != "" {
-		filters["type"] = userType
+		filters.Type = userType
 	}
 	if status := c.Query("status"); status != "" {
-		filters["status"] = status
+		filters.Status = status
 	}
 
-	users, err := h.service.ListUsers(c.Request.Context(), filters)
+	users, err := h.service.ListUsers(c.Request.Context(), &filters)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

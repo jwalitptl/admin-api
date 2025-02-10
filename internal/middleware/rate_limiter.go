@@ -8,7 +8,7 @@ import (
 )
 
 type RateLimiterConfig struct {
-	Rate  rate.Limit
+	RPS   float64
 	Burst int
 }
 
@@ -18,7 +18,7 @@ type RateLimiter struct {
 
 func NewRateLimiter(config RateLimiterConfig) *RateLimiter {
 	return &RateLimiter{
-		limiter: rate.NewLimiter(config.Rate, config.Burst),
+		limiter: rate.NewLimiter(rate.Limit(config.RPS), config.Burst),
 	}
 }
 

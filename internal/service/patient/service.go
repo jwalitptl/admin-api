@@ -14,16 +14,18 @@ import (
 )
 
 type Service struct {
-	repo        repository.PatientRepository
-	auditor     *audit.Service
-	medicalRepo repository.MedicalRecordRepository
+	repo            repository.PatientRepository
+	auditor         *audit.Service
+	medicalRepo     repository.MedicalRecordRepository
+	appointmentRepo repository.AppointmentRepository
 }
 
-func NewService(repo repository.PatientRepository, medicalRepo repository.MedicalRecordRepository, auditor *audit.Service) *Service {
+func NewService(repo repository.PatientRepository, medicalRepo repository.MedicalRecordRepository, appointmentRepo repository.AppointmentRepository, auditor *audit.Service) *Service {
 	return &Service{
-		repo:        repo,
-		medicalRepo: medicalRepo,
-		auditor:     auditor,
+		repo:            repo,
+		medicalRepo:     medicalRepo,
+		appointmentRepo: appointmentRepo,
+		auditor:         auditor,
 	}
 }
 
@@ -190,15 +192,27 @@ func (s *Service) unmarshalJSONFields(patient *model.Patient) error {
 }
 
 func (s *Service) getCurrentUserID(ctx context.Context) uuid.UUID {
+	if ctx == nil {
+		return uuid.Nil
+	}
 	if userID, ok := ctx.Value("user_id").(uuid.UUID); ok {
 		return userID
 	}
 	return uuid.Nil
 }
 
+func (s *Service) getPatientOrganizationID(ctx context.Context, patientID uuid.UUID) uuid.UUID {
+	patient, err := s.repo.Get(ctx, patientID)
+	if err != nil {
+		return uuid.Nil
+	}
+	return patient.OrganizationID
+}
+
 func (s *Service) AddMedicalRecord(ctx context.Context, patientID uuid.UUID, record *model.MedicalRecord) error {
 	record.ID = uuid.New()
 	record.PatientID = patientID
+	record.OrganizationID = s.getPatientOrganizationID(ctx, patientID)
 	record.CreatedAt = time.Now()
 	record.UpdatedAt = time.Now()
 
@@ -207,12 +221,8 @@ func (s *Service) AddMedicalRecord(ctx context.Context, patientID uuid.UUID, rec
 	}
 
 	// Log audit
-	s.auditor.Log(ctx, &model.AuditLog{
-		ID:         uuid.New(),
-		EntityType: "medical_record",
-		EntityID:   record.ID,
-		Action:     "create",
-		CreatedAt:  time.Now(),
+	s.auditor.Log(ctx, s.getCurrentUserID(ctx), record.OrganizationID, "create", "medical_record", record.ID, &audit.LogOptions{
+		Changes: record,
 	})
 
 	return nil
@@ -227,13 +237,7 @@ func (s *Service) GetMedicalRecord(ctx context.Context, patientID, recordID uuid
 	for _, record := range records {
 		if record.ID == recordID {
 			// Log access
-			s.auditor.Log(ctx, &model.AuditLog{
-				ID:         uuid.New(),
-				EntityType: "medical_record",
-				EntityID:   recordID,
-				Action:     "read",
-				CreatedAt:  time.Now(),
-			})
+			s.auditor.Log(ctx, s.getCurrentUserID(ctx), record.OrganizationID, "read", "medical_record", recordID, nil)
 			return record, nil
 		}
 	}
@@ -270,28 +274,28 @@ func (s *Service) ListMedicalRecords(ctx context.Context, patientID uuid.UUID, f
 
 func (s *Service) CreateAppointment(ctx context.Context, req *model.CreateAppointmentRequest) (*model.Appointment, error) {
 	appointment := &model.Appointment{
-		ID:        uuid.New(),
-		ServiceID: req.ServiceID,
-		StaffID:   req.StaffID,
-		StartTime: req.StartTime,
-		EndTime:   req.EndTime,
-		Status:    string(model.AppointmentStatusScheduled),
-		Notes:     req.Notes,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		Base: model.Base{
+			ID:        uuid.New(),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
+		ServiceID:   req.ServiceID,
+		ClinicID:    uuid.MustParse(req.ClinicID),
+		ClinicianID: uuid.MustParse(req.ClinicianID),
+		PatientID:   req.PatientID,
+		StartTime:   req.StartTime,
+		EndTime:     req.EndTime,
+		Status:      model.AppointmentStatusScheduled,
+		Notes:       req.Notes,
 	}
 
-	if err := s.repo.CreateAppointment(ctx, appointment); err != nil {
+	if err := s.appointmentRepo.Create(ctx, appointment); err != nil {
 		return nil, fmt.Errorf("failed to create appointment: %w", err)
 	}
 
 	// Log audit
-	s.auditor.Log(ctx, &model.AuditLog{
-		ID:         uuid.New(),
-		EntityType: "appointment",
-		EntityID:   appointment.ID,
-		Action:     "create",
-		CreatedAt:  time.Now(),
+	s.auditor.Log(ctx, s.getCurrentUserID(ctx), req.ServiceID, "create", "appointment", appointment.ID, &audit.LogOptions{
+		Changes: appointment,
 	})
 
 	return appointment, nil
@@ -300,48 +304,44 @@ func (s *Service) CreateAppointment(ctx context.Context, req *model.CreateAppoin
 func (s *Service) UpdateAppointment(ctx context.Context, appointment *model.Appointment) error {
 	appointment.UpdatedAt = time.Now()
 
-	if err := s.repo.UpdateAppointment(ctx, appointment); err != nil {
+	if err := s.appointmentRepo.Update(ctx, appointment); err != nil {
 		return fmt.Errorf("failed to update appointment: %w", err)
 	}
 
 	// Log audit
-	s.auditor.Log(ctx, &model.AuditLog{
-		ID:         uuid.New(),
-		EntityType: "appointment",
-		EntityID:   appointment.ID,
-		Action:     "update",
-		CreatedAt:  time.Now(),
+	s.auditor.Log(ctx, s.getCurrentUserID(ctx), appointment.ClinicID, "update", "appointment", appointment.ID, &audit.LogOptions{
+		Changes: appointment,
 	})
 
 	return nil
 }
 
 func (s *Service) CancelAppointment(ctx context.Context, appointmentID uuid.UUID, reason string) error {
-	appointment, err := s.repo.GetAppointment(ctx, appointmentID)
+	appointment, err := s.appointmentRepo.Get(ctx, appointmentID)
 	if err != nil {
 		return fmt.Errorf("failed to get appointment: %w", err)
 	}
 
-	appointment.Status = string(model.AppointmentStatusCancelled)
+	appointment.Status = model.AppointmentStatusCancelled
 	appointment.Notes = reason
 	appointment.UpdatedAt = time.Now()
 
-	if err := s.repo.UpdateAppointment(ctx, appointment); err != nil {
+	if err := s.appointmentRepo.Update(ctx, appointment); err != nil {
 		return fmt.Errorf("failed to cancel appointment: %w", err)
 	}
 
 	// Log audit
-	s.auditor.Log(ctx, &model.AuditLog{
-		ID:         uuid.New(),
-		EntityType: "appointment",
-		EntityID:   appointmentID,
-		Action:     "cancel",
-		CreatedAt:  time.Now(),
+	s.auditor.Log(ctx, s.getCurrentUserID(ctx), appointment.ClinicID, "cancel", "appointment", appointmentID, &audit.LogOptions{
+		Changes: appointment,
 	})
 
 	return nil
 }
 
 func (s *Service) ListAppointments(ctx context.Context, patientID uuid.UUID, filters *model.AppointmentFilters) ([]*model.Appointment, error) {
-	return s.repo.ListAppointments(ctx, patientID, filters)
+	if filters == nil {
+		filters = &model.AppointmentFilters{}
+	}
+	filters.PatientID = patientID
+	return s.appointmentRepo.List(ctx, filters)
 }

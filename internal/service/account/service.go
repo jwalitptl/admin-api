@@ -7,10 +7,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jwalitptl/admin-api/internal/email"
 	"github.com/jwalitptl/admin-api/internal/model"
 	"github.com/jwalitptl/admin-api/internal/repository"
 	"github.com/jwalitptl/admin-api/internal/service/audit"
-	"github.com/jwalitptl/admin-api/internal/service/email"
 )
 
 type Service struct {
@@ -60,6 +60,10 @@ func (s *Service) CreateAccount(ctx context.Context, req *model.CreateAccountReq
 		return nil, fmt.Errorf("failed to create organization: %w", err)
 	}
 
+	s.auditor.Log(ctx, uuid.Nil, org.ID, "create", "account", account.ID, &audit.LogOptions{
+		Changes: account,
+	})
+
 	// Send welcome email
 	if err := s.emailSvc.SendWelcome(ctx, account.Email, account.Name); err != nil {
 		s.auditor.Log(ctx, uuid.Nil, org.ID, "welcome_email_failed", "account", account.ID, &audit.LogOptions{
@@ -68,10 +72,6 @@ func (s *Service) CreateAccount(ctx context.Context, req *model.CreateAccountReq
 			},
 		})
 	}
-
-	s.auditor.Log(ctx, uuid.Nil, org.ID, "create", "account", account.ID, &audit.LogOptions{
-		Changes: account,
-	})
 
 	return account, nil
 }
@@ -136,7 +136,7 @@ func (s *Service) DeleteAccount(ctx context.Context, id uuid.UUID) error {
 }
 
 func (s *Service) ListAccounts(ctx context.Context, filters *model.AccountFilters) ([]*model.Account, error) {
-	accounts, err := s.accountRepo.List(ctx, filters)
+	accounts, err := s.accountRepo.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list accounts: %w", err)
 	}

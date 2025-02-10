@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jwalitptl/admin-api/internal/model"
 	"github.com/jwalitptl/admin-api/internal/repository"
 	"github.com/jwalitptl/admin-api/internal/service/audit"
@@ -36,6 +37,9 @@ type cachedRegion struct {
 }
 
 func NewService(repo repository.RegionRepository, geoIPDB GeoIPDB, auditor *audit.Service, defaultConfig *model.RegionConfig) *Service {
+	if defaultConfig == nil {
+		defaultConfig = &model.RegionConfig{}
+	}
 	return &Service{
 		repo:          repo,
 		geoIPDB:       geoIPDB,
@@ -62,7 +66,7 @@ func (s *Service) GetRegionFromIP(ctx context.Context, ipAddr string) (string, e
 		return defaultRegionCode, fmt.Errorf("failed to get region code: %w", err)
 	}
 
-	s.auditor.Log(ctx, nil, nil, "lookup", "region", nil, &audit.LogOptions{
+	s.auditor.Log(ctx, uuid.Nil, uuid.Nil, "lookup", "region", uuid.Nil, &audit.LogOptions{
 		Metadata: map[string]interface{}{
 			"ip":           ipAddr,
 			"country_code": countryCode,
@@ -74,6 +78,10 @@ func (s *Service) GetRegionFromIP(ctx context.Context, ipAddr string) (string, e
 }
 
 func (s *Service) GetRegionConfig(ctx context.Context, regionCode string) (*model.RegionConfig, error) {
+	if s.defaultConfig == nil {
+		s.defaultConfig = &model.RegionConfig{}
+	}
+
 	if regionCode == "" {
 		return s.defaultConfig, nil
 	}
@@ -112,7 +120,7 @@ func (s *Service) GetRegionConfig(ctx context.Context, regionCode string) (*mode
 	// Cache the config
 	s.cacheConfig(regionCode, config)
 
-	s.auditor.Log(ctx, nil, nil, "get_config", "region", nil, &audit.LogOptions{
+	s.auditor.Log(ctx, uuid.Nil, uuid.Nil, "get_config", "region", uuid.Nil, &audit.LogOptions{
 		Metadata: map[string]interface{}{
 			"region_code": regionCode,
 			"features":    region.Features,
@@ -135,7 +143,7 @@ func (s *Service) UpdateRegion(ctx context.Context, region *model.Region) error 
 	// Invalidate cache
 	s.cache.Delete(region.Code)
 
-	s.auditor.Log(ctx, nil, nil, "update", "region", nil, &audit.LogOptions{
+	s.auditor.Log(ctx, uuid.Nil, uuid.Nil, "update", "region", uuid.Nil, &audit.LogOptions{
 		Changes: region,
 	})
 
@@ -207,4 +215,22 @@ func (s *Service) cacheConfig(regionCode string, config *model.RegionConfig) {
 		config:    config,
 		expiresAt: time.Now().Add(s.cacheTTL),
 	})
+}
+
+func (s *Service) GetDefaultConfig() *model.RegionConfig {
+	return &model.RegionConfig{
+		Region: &model.Region{
+			Code: defaultRegionCode,
+			Name: "Global",
+		},
+		AuditConfig: &model.AuditConfig{
+			RetentionDays: 90,
+		},
+		SecurityConfig: &model.SecurityConfig{
+			MFARequired: false,
+		},
+		APIConfig: &model.APIConfig{
+			RateLimit: 1000,
+		},
+	}
 }

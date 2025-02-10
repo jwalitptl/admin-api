@@ -2,15 +2,15 @@ package postgres
 
 import (
 	"context"
+
 	"github.com/google/uuid"
 
 	"github.com/jwalitptl/admin-api/internal/model"
-
-	"github.com/jmoiron/sqlx"
+	"github.com/jwalitptl/admin-api/internal/repository"
 )
 
 type PermissionRepository struct {
-	db *sqlx.DB
+	BaseRepository
 }
 
 func (r *PermissionRepository) Create(ctx context.Context, permission *model.Permission) error {
@@ -33,16 +33,17 @@ func (r *PermissionRepository) Get(ctx context.Context, id uuid.UUID) (*model.Pe
 	panic("implement me")
 }
 
-func NewPermissionRepository(db *sqlx.DB) *PermissionRepository {
-	return &PermissionRepository{db: db}
+func NewPermissionRepository(base BaseRepository) repository.PermissionRepository {
+	return &PermissionRepository{base}
 }
 
-func (r *PermissionRepository) List(ctx context.Context) ([]*model.Permission, error) {
+func (r *PermissionRepository) List(ctx context.Context, orgID uuid.UUID) ([]*model.Permission, error) {
 	var permissions []*model.Permission
 	query := `
 		SELECT id, name, description, created_at, updated_at 
 		FROM permissions 
+		WHERE organization_id = $1
 		ORDER BY name`
-	err := r.db.SelectContext(ctx, &permissions, query)
+	err := r.db.SelectContext(ctx, &permissions, query, orgID)
 	return permissions, err
 }
