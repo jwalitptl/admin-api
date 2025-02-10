@@ -13,6 +13,20 @@ import (
 	"github.com/jwalitptl/admin-api/internal/service/audit"
 )
 
+type AccountServicer interface {
+	CreateAccount(ctx context.Context, req *model.CreateAccountRequest) (*model.Account, error)
+	GetAccount(ctx context.Context, id uuid.UUID) (*model.Account, error)
+	UpdateAccount(ctx context.Context, account *model.Account) error
+	DeleteAccount(ctx context.Context, id uuid.UUID) error
+	ListAccounts(ctx context.Context, filters *model.AccountFilters) ([]*model.Account, error)
+	CreateOrganization(ctx context.Context, org *model.Organization) error
+	UpdateOrganization(ctx context.Context, org *model.Organization) error
+	DeleteOrganization(ctx context.Context, id uuid.UUID) error
+	ListOrganizations(ctx context.Context, accountID uuid.UUID) ([]*model.Organization, error)
+	GetOrganization(ctx context.Context, id uuid.UUID) (*model.Organization, error)
+	// ... other methods used by the handler
+}
+
 type Service struct {
 	accountRepo repository.AccountRepository
 	orgRepo     repository.OrganizationRepository
@@ -136,11 +150,7 @@ func (s *Service) DeleteAccount(ctx context.Context, id uuid.UUID) error {
 }
 
 func (s *Service) ListAccounts(ctx context.Context, filters *model.AccountFilters) ([]*model.Account, error) {
-	accounts, err := s.accountRepo.List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list accounts: %w", err)
-	}
-	return accounts, nil
+	return s.accountRepo.List(ctx)
 }
 
 func (s *Service) validateAccountRequest(req *model.CreateAccountRequest) error {

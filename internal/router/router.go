@@ -9,8 +9,16 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/jwalitptl/admin-api/internal/handler"
+	"github.com/jwalitptl/admin-api/internal/handler/account"
+	"github.com/jwalitptl/admin-api/internal/handler/appointment"
+	authHandler "github.com/jwalitptl/admin-api/internal/handler/auth"
+	"github.com/jwalitptl/admin-api/internal/handler/clinic"
+	"github.com/jwalitptl/admin-api/internal/handler/patient"
+	permissionHandler "github.com/jwalitptl/admin-api/internal/handler/permission"
+	rbacHandler "github.com/jwalitptl/admin-api/internal/handler/rbac"
+	"github.com/jwalitptl/admin-api/internal/handler/user"
 	"github.com/jwalitptl/admin-api/internal/middleware"
-	"github.com/jwalitptl/admin-api/pkg/event"
+	pkg_event "github.com/jwalitptl/admin-api/pkg/event"
 )
 
 type Handler interface {
@@ -19,7 +27,7 @@ type Handler interface {
 
 type EventHandler interface {
 	Handler
-	RegisterRoutesWithEvents(*gin.RouterGroup, *event.EventTrackerMiddleware)
+	RegisterRoutesWithEvents(*gin.RouterGroup, *pkg_event.EventTrackerMiddleware)
 }
 
 type Router struct {
@@ -33,7 +41,7 @@ type Router struct {
 	patientHandler    EventHandler
 	permissionHandler EventHandler
 	h                 *handler.Handler
-	eventTracker      *event.EventTrackerMiddleware
+	eventTracker      *pkg_event.EventTrackerMiddleware
 	userHandler       EventHandler
 	regionValidation  *middleware.RegionValidationMiddleware
 	metrics           *routerMetrics
@@ -52,67 +60,42 @@ type RouterConfig struct {
 	MetricsPrefix string
 }
 
-func NewRouter(
-	auth *middleware.AuthMiddleware,
-	accountH EventHandler,
-	authH Handler,
-	clinicH EventHandler,
-	userH EventHandler,
-	rbacH EventHandler,
-	appointmentH EventHandler,
-	patientHandler EventHandler,
-	permissionHandler EventHandler,
-	h *handler.Handler,
-	eventTracker *event.EventTrackerMiddleware,
-	regionValidation *middleware.RegionValidationMiddleware,
-	config RouterConfig,
-) *Router {
-	// Set production mode
+type Config struct {
+	AuthMiddleware     *middleware.AuthMiddleware
+	HIPAAMiddleware    *middleware.HIPAAMiddleware
+	RegionMiddleware   *middleware.RegionMiddleware
+	RegionValidation   *middleware.RegionValidationMiddleware
+	AccountHandler     *account.Handler
+	AuthHandler        *authHandler.Handler
+	ClinicHandler      *clinic.Handler
+	UserHandler        *user.Handler
+	RBACHandler        *rbacHandler.Handler
+	AppointmentHandler *appointment.Handler
+	PermissionHandler  *permissionHandler.Handler
+	PatientHandler     *patient.Handler
+	BaseHandler        *handler.Handler
+	EventTracker       *pkg_event.EventTrackerMiddleware
+}
+
+func NewRouter(config Config) *Router {
 	gin.SetMode(gin.ReleaseMode)
+	engine := gin.New()
 
-	engine := gin.New() // Use New() instead of Default() for more control
-
-	// Initialize metrics
-	metrics := initRouterMetrics(config.MetricsPrefix)
-
-	r := &Router{
+	return &Router{
 		engine:            engine,
-		auth:              auth,
-		accountH:          accountH,
-		authH:             authH,
-		clinicH:           clinicH,
-		rbacH:             rbacH,
-		appointmentH:      appointmentH,
-		patientHandler:    patientHandler,
-		permissionHandler: permissionHandler,
-		h:                 h,
-		eventTracker:      eventTracker,
-		userHandler:       userH,
-		regionValidation:  regionValidation,
-		metrics:           metrics,
+		auth:              config.AuthMiddleware,
+		accountH:          config.AccountHandler,
+		authH:             config.AuthHandler,
+		clinicH:           config.ClinicHandler,
+		rbacH:             config.RBACHandler,
+		appointmentH:      config.AppointmentHandler,
+		patientHandler:    config.PatientHandler,
+		permissionHandler: config.PermissionHandler,
+		h:                 config.BaseHandler,
+		eventTracker:      config.EventTracker,
+		userHandler:       config.UserHandler,
+		regionValidation:  config.RegionValidation,
 	}
-
-	// Add core middlewares
-	engine.Use(
-		gin.Recovery(),
-		middleware.Logger(),
-		middleware.ErrorHandler(),
-		r.metricsMiddleware(),
-		middleware.Timeout(middleware.TimeoutConfig{Duration: 30 * time.Second}),
-		middleware.RequestID(),
-	)
-
-	// Add CORS with config
-	engine.Use(middleware.CORS(config.CORSConfig))
-
-	// Configure rate limiter
-	rateLimiter := middleware.NewRateLimiter(middleware.RateLimiterConfig{
-		RPS:   float64(config.RateLimit),
-		Burst: config.RateBurst,
-	})
-	engine.Use(rateLimiter.RateLimit())
-
-	return r
 }
 
 func (r *Router) Setup() {

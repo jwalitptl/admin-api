@@ -15,10 +15,10 @@ import (
 )
 
 type Handler struct {
-	service accountService.Service
+	service accountService.AccountServicer
 }
 
-func NewHandler(service accountService.Service) *Handler {
+func NewHandler(service accountService.AccountServicer) *Handler {
 	return &Handler{service: service}
 }
 

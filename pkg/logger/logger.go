@@ -30,7 +30,7 @@ type Config struct {
 
 // Logger wraps zerolog.Logger
 type Logger struct {
-	zl zerolog.Logger
+	ZL zerolog.Logger
 }
 
 // NewLogger creates a new logger instance
@@ -55,36 +55,36 @@ func NewLogger(cfg *Config) *Logger {
 		Caller().
 		Logger()
 
-	return &Logger{zl: logger}
+	return &Logger{ZL: logger}
 }
 
 // WithContext adds context fields to logger
 func (l *Logger) WithContext(ctx context.Context) *Logger {
-	return &Logger{zl: l.zl.With().Interface("context", ctx).Logger()}
+	return &Logger{ZL: l.ZL.With().Interface("context", ctx).Logger()}
 }
 
 // WithFields adds fields to logger
 func (l *Logger) WithFields(fields map[string]interface{}) *Logger {
-	return &Logger{zl: l.zl.With().Fields(fields).Logger()}
+	return &Logger{ZL: l.ZL.With().Fields(fields).Logger()}
 }
 
 func (l *Logger) Info(msg string, fields ...interface{}) {
-	l.zl.Info().Fields(fields).Msg(msg)
+	l.ZL.Info().Fields(fields).Msg(msg)
 }
 
 func (l *Logger) Error(err error, msg string, fields ...interface{}) {
-	l.zl.Error().Err(err).Fields(fields).Msg(msg)
+	l.ZL.Error().Err(err).Fields(fields).Msg(msg)
 }
 
 func (l *Logger) Fatal(err error, msg string, fields ...interface{}) {
-	l.zl.Fatal().Err(err).Fields(fields).Msg(msg)
+	l.ZL.Fatal().Err(err).Fields(fields).Msg(msg)
 }
 
 func (l *Logger) Debug(msg string, fields ...interface{}) {
-	l.zl.Debug().Fields(fields).Msg(msg)
+	l.ZL.Debug().Fields(fields).Msg(msg)
 }
 
 // Add Warn method to Logger
 func (l *Logger) Warn(msg string, fields ...interface{}) {
-	l.zl.Warn().Fields(fields).Msg(msg)
+	l.ZL.Warn().Fields(fields).Msg(msg)
 }

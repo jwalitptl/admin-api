@@ -17,19 +17,55 @@ const (
 	systemRoleUser  = "user"
 )
 
-type Service struct {
+type Service interface {
+	HasPermission(ctx context.Context, userID uuid.UUID, permission string) (bool, error)
+	CreateRole(ctx context.Context, role *model.Role) error
+	GetRole(ctx context.Context, id uuid.UUID) (*model.Role, error)
+	UpdateRole(ctx context.Context, role *model.Role) error
+	DeleteRole(ctx context.Context, id uuid.UUID) error
+	ListRoles(ctx context.Context, orgID uuid.UUID) ([]*model.Role, error)
+	AssignRoleToUser(ctx context.Context, userID, roleID uuid.UUID) error
+	RemoveRoleFromUser(ctx context.Context, userID, roleID uuid.UUID) error
+	AddPermissionToRole(ctx context.Context, roleID uuid.UUID, permission string) error
+	RemovePermissionFromRole(ctx context.Context, roleID uuid.UUID, permissionID uuid.UUID) error
+	CreatePermission(ctx context.Context, permission *model.Permission) error
+	GetPermission(ctx context.Context, id uuid.UUID) (*model.Permission, error)
+	UpdatePermission(ctx context.Context, permission *model.Permission) error
+	DeletePermission(ctx context.Context, id uuid.UUID) error
+	ListPermissions(ctx context.Context) ([]*model.Permission, error)
+	AssignPermissionToRole(ctx context.Context, roleID, permissionID uuid.UUID) error
+	AssignRoleToClinician(ctx context.Context, clinicianID, roleID, orgID uuid.UUID) error
+	RemoveRoleFromClinician(ctx context.Context, clinicianID, roleID, orgID uuid.UUID) error
+	ListRolePermissions(ctx context.Context, roleID uuid.UUID) ([]*model.Permission, error)
+	ListClinicianRoles(ctx context.Context, clinicianID, orgID uuid.UUID) ([]*model.Role, error)
+}
+
+type service struct {
 	repo    repository.RBACRepository
 	auditor *audit.Service
 }
 
-func NewService(repo repository.RBACRepository, auditor *audit.Service) *Service {
-	return &Service{
+func NewService(repo repository.RBACRepository, auditor *audit.Service) Service {
+	// Initialize system roles if they don't exist
+	ctx := context.Background()
+	for _, roleName := range []string{systemRoleAdmin, systemRoleUser} {
+		role := &model.Role{
+			Name:         roleName,
+			IsSystemRole: true,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}
+		// Ignore error if role already exists
+		_ = repo.CreateRole(ctx, role)
+	}
+
+	return &service{
 		repo:    repo,
 		auditor: auditor,
 	}
 }
 
-func (s *Service) HasPermission(ctx context.Context, userID uuid.UUID, permission string) (bool, error) {
+func (s *service) HasPermission(ctx context.Context, userID uuid.UUID, permission string) (bool, error) {
 	roles, err := s.repo.GetUserRoles(ctx, userID)
 	if err != nil {
 		return false, fmt.Errorf("failed to get user roles: %w", err)
@@ -51,7 +87,7 @@ func (s *Service) HasPermission(ctx context.Context, userID uuid.UUID, permissio
 	return false, nil
 }
 
-func (s *Service) CreateRole(ctx context.Context, role *model.Role) error {
+func (s *service) CreateRole(ctx context.Context, role *model.Role) error {
 	if err := s.validateRole(role); err != nil {
 		return fmt.Errorf("invalid role: %w", err)
 	}
@@ -75,7 +111,7 @@ func (s *Service) CreateRole(ctx context.Context, role *model.Role) error {
 	return nil
 }
 
-func (s *Service) GetRole(ctx context.Context, id uuid.UUID) (*model.Role, error) {
+func (s *service) GetRole(ctx context.Context, id uuid.UUID) (*model.Role, error) {
 	role, err := s.repo.GetRole(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get role: %w", err)
@@ -89,7 +125,7 @@ func (s *Service) GetRole(ctx context.Context, id uuid.UUID) (*model.Role, error
 	return role, nil
 }
 
-func (s *Service) UpdateRole(ctx context.Context, role *model.Role) error {
+func (s *service) UpdateRole(ctx context.Context, role *model.Role) error {
 	if err := s.validateRole(role); err != nil {
 		return fmt.Errorf("invalid role: %w", err)
 	}
@@ -114,7 +150,7 @@ func (s *Service) UpdateRole(ctx context.Context, role *model.Role) error {
 	return nil
 }
 
-func (s *Service) DeleteRole(ctx context.Context, id uuid.UUID) error {
+func (s *service) DeleteRole(ctx context.Context, id uuid.UUID) error {
 	role, err := s.repo.GetRole(ctx, id)
 	if err != nil {
 		return fmt.Errorf("failed to get role: %w", err)
@@ -136,7 +172,7 @@ func (s *Service) DeleteRole(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (s *Service) ListRoles(ctx context.Context, orgID uuid.UUID) ([]*model.Role, error) {
+func (s *service) ListRoles(ctx context.Context, orgID uuid.UUID) ([]*model.Role, error) {
 	roles, err := s.repo.ListRoles(ctx, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list roles: %w", err)
@@ -144,7 +180,7 @@ func (s *Service) ListRoles(ctx context.Context, orgID uuid.UUID) ([]*model.Role
 	return roles, nil
 }
 
-func (s *Service) AssignRoleToUser(ctx context.Context, userID, roleID uuid.UUID) error {
+func (s *service) AssignRoleToUser(ctx context.Context, userID, roleID uuid.UUID) error {
 	role, err := s.repo.GetRole(ctx, roleID)
 	if err != nil {
 		return fmt.Errorf("failed to get role: %w", err)
@@ -167,7 +203,7 @@ func (s *Service) AssignRoleToUser(ctx context.Context, userID, roleID uuid.UUID
 	return nil
 }
 
-func (s *Service) RemoveRoleFromUser(ctx context.Context, userID, roleID uuid.UUID) error {
+func (s *service) RemoveRoleFromUser(ctx context.Context, userID, roleID uuid.UUID) error {
 	role, err := s.repo.GetRole(ctx, roleID)
 	if err != nil {
 		return fmt.Errorf("failed to get role: %w", err)
@@ -190,63 +226,67 @@ func (s *Service) RemoveRoleFromUser(ctx context.Context, userID, roleID uuid.UU
 	return nil
 }
 
-func (s *Service) AddPermissionToRole(ctx context.Context, roleID uuid.UUID, permission string) error {
+func (s *service) AddPermissionToRole(ctx context.Context, roleID uuid.UUID, permission string) error {
 	if err := s.repo.AddPermissionToRole(ctx, roleID, permission); err != nil {
 		return fmt.Errorf("failed to add permission to role: %w", err)
 	}
 	return nil
 }
 
-func (s *Service) RemovePermissionFromRole(ctx context.Context, roleID uuid.UUID, permissionID uuid.UUID) error {
+func (s *service) RemovePermissionFromRole(ctx context.Context, roleID uuid.UUID, permissionID uuid.UUID) error {
 	if err := s.repo.RemovePermissionFromRole(ctx, roleID, permissionID); err != nil {
 		return fmt.Errorf("failed to remove permission from role: %w", err)
 	}
 	return nil
 }
 
-func (s *Service) CreatePermission(ctx context.Context, permission *model.Permission) error {
+func (s *service) CreatePermission(ctx context.Context, permission *model.Permission) error {
 	return s.repo.CreatePermission(ctx, permission)
 }
 
-func (s *Service) GetPermission(ctx context.Context, id uuid.UUID) (*model.Permission, error) {
+func (s *service) GetPermission(ctx context.Context, id uuid.UUID) (*model.Permission, error) {
 	return s.repo.GetPermission(ctx, id)
 }
 
-func (s *Service) UpdatePermission(ctx context.Context, permission *model.Permission) error {
+func (s *service) UpdatePermission(ctx context.Context, permission *model.Permission) error {
 	return s.repo.UpdatePermission(ctx, permission)
 }
 
-func (s *Service) DeletePermission(ctx context.Context, id uuid.UUID) error {
+func (s *service) DeletePermission(ctx context.Context, id uuid.UUID) error {
 	return s.repo.DeletePermission(ctx, id)
 }
 
-func (s *Service) ListPermissions(ctx context.Context) ([]*model.Permission, error) {
+func (s *service) ListPermissions(ctx context.Context) ([]*model.Permission, error) {
 	return s.repo.ListPermissions(ctx)
 }
 
-func (s *Service) AssignPermissionToRole(ctx context.Context, roleID, permissionID uuid.UUID) error {
+func (s *service) AssignPermissionToRole(ctx context.Context, roleID, permissionID uuid.UUID) error {
 	return s.repo.AssignPermissionToRole(ctx, roleID, permissionID)
 }
 
-func (s *Service) AssignRoleToClinician(ctx context.Context, clinicianID, roleID, orgID uuid.UUID) error {
+func (s *service) AssignRoleToClinician(ctx context.Context, clinicianID, roleID, orgID uuid.UUID) error {
 	return s.repo.AssignRoleToClinician(ctx, clinicianID, roleID, orgID)
 }
 
-func (s *Service) RemoveRoleFromClinician(ctx context.Context, clinicianID, roleID, orgID uuid.UUID) error {
+func (s *service) RemoveRoleFromClinician(ctx context.Context, clinicianID, roleID, orgID uuid.UUID) error {
 	return s.repo.RemoveRoleFromClinician(ctx, clinicianID, roleID, orgID)
 }
 
-func (s *Service) ListRolePermissions(ctx context.Context, roleID uuid.UUID) ([]*model.Permission, error) {
+func (s *service) ListRolePermissions(ctx context.Context, roleID uuid.UUID) ([]*model.Permission, error) {
 	return s.repo.ListRolePermissions(ctx, roleID)
 }
 
-func (s *Service) ListClinicianRoles(ctx context.Context, clinicianID, orgID uuid.UUID) ([]*model.Role, error) {
+func (s *service) ListClinicianRoles(ctx context.Context, clinicianID, orgID uuid.UUID) ([]*model.Role, error) {
 	return s.repo.ListClinicianRoles(ctx, clinicianID, orgID)
 }
 
-func (s *Service) validateRole(role *model.Role) error {
+func (s *service) validateRole(role *model.Role) error {
 	if role.Name == "" {
 		return fmt.Errorf("role name is required")
+	}
+
+	if role.Name == systemRoleAdmin || role.Name == systemRoleUser {
+		role.IsSystemRole = true
 	}
 
 	if role.OrganizationID == nil && !role.IsSystemRole {
@@ -256,7 +296,7 @@ func (s *Service) validateRole(role *model.Role) error {
 	return nil
 }
 
-func (s *Service) getCurrentUserID(ctx context.Context) uuid.UUID {
+func (s *service) getCurrentUserID(ctx context.Context) uuid.UUID {
 	if userID, ok := ctx.Value("user_id").(uuid.UUID); ok {
 		return userID
 	}

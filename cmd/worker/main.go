@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,16 +10,21 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jwalitptl/admin-api/config"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+
+	"github.com/jmoiron/sqlx"
+	"github.com/jwalitptl/admin-api/internal/config"
 	"github.com/jwalitptl/admin-api/internal/model"
 	"github.com/jwalitptl/admin-api/internal/repository/postgres"
 	"github.com/jwalitptl/admin-api/pkg/logger"
 	"github.com/jwalitptl/admin-api/pkg/messaging"
 	"github.com/jwalitptl/admin-api/pkg/messaging/redis"
+	"github.com/jwalitptl/admin-api/pkg/metrics"
 	"github.com/jwalitptl/admin-api/pkg/worker"
+	_ "github.com/lib/pq"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"go.uber.org/zap"
 )
 
 var (
@@ -57,7 +61,7 @@ var (
 type EventWorker struct {
 	outboxRepo postgres.OutboxRepository
 	broker     messaging.Broker
-	logger     *zap.Logger
+	logger     *logger.Logger
 	batchSize  int
 	workerID   string
 	metrics    *WorkerMetrics
@@ -70,14 +74,16 @@ type WorkerMetrics struct {
 	processedEvents    prometheus.Counter
 	failedEvents       prometheus.Counter
 	processingDuration prometheus.Histogram
+	processingLatency  *prometheus.HistogramVec
+	retryCount         *prometheus.CounterVec
 }
 
-func NewEventWorker(outboxRepo postgres.OutboxRepository, broker messaging.Broker, logger *zap.Logger) *EventWorker {
+func NewEventWorker(outboxRepo postgres.OutboxRepository, broker messaging.Broker, logger *logger.Logger) *EventWorker {
 	workerID := fmt.Sprintf("worker-%s", generateWorkerID())
 	return &EventWorker{
 		outboxRepo: outboxRepo,
 		broker:     broker,
-		logger:     logger.With(zap.String("worker_id", workerID)),
+		logger:     logger.WithFields(map[string]interface{}{"worker_id": workerID}),
 		batchSize:  100,
 		workerID:   workerID,
 		maxRetries: 3,
@@ -86,51 +92,68 @@ func NewEventWorker(outboxRepo postgres.OutboxRepository, broker messaging.Broke
 			processedEvents:    processedEvents,
 			failedEvents:       failedEvents,
 			processingDuration: processingDuration,
+			processingLatency:  eventProcessingLatency,
+			retryCount:         eventRetryCount,
 		},
 	}
 }
 
-func setupHealthCheck(logger *zap.Logger) {
+func setupHealthCheck(logger *logger.Logger) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health/live", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
 	mux.HandleFunc("/health/ready", func(w http.ResponseWriter, r *http.Request) {
-		// Add DB and Redis health checks
 		w.WriteHeader(http.StatusOK)
 	})
 
 	go func() {
 		if err := http.ListenAndServe(":8081", mux); err != nil {
-			logger.Error("Health check server failed", zap.Error(err))
+			logger.ZL.Error().Err(err).Msg("Health check server failed")
+			os.Exit(1)
 		}
 	}()
 }
 
 func main() {
 	// Load config
-	cfg, err := config.Load()
+	cfg, err := config.LoadConfig()
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to load config")
+		log.Logger.Fatal().Err(err).Msg("Failed to load config")
+		os.Exit(1)
 	}
 
 	// Initialize logger
-	logger := logger.NewLogger(&logger.Config{
-		Level:      logger.InfoLevel,
-		TimeFormat: time.RFC3339,
-		Output:     os.Stdout,
-	})
+	log.Logger = zerolog.New(os.Stdout).With().Timestamp().Logger()
+	logger := &logger.Logger{ZL: log.Logger}
+
+	// Initialize database
+	dbURL := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		cfg.Database.Host,
+		cfg.Database.Port,
+		cfg.Database.User,
+		cfg.Database.Password,
+		cfg.Database.Name,
+		cfg.Database.SSLMode,
+	)
+	db, err := sqlx.Connect("postgres", dbURL)
+	if err != nil {
+		logger.ZL.Fatal().Err(err).Msg("Failed to connect to database")
+		os.Exit(1)
+	}
+	defer db.Close()
 
 	// Initialize Redis broker
-	broker, err := redis.NewRedisBroker(cfg.Redis.ToBrokerConfig(), logger)
+	broker, err := redis.NewRedisBroker(cfg.ToBrokerConfig(), logger)
 	if err != nil {
-		logger.Fatal(err, "Failed to create Redis broker")
+		logger.ZL.Fatal().Err(err).Msg("Failed to create Redis broker")
 	}
 	defer broker.Close()
 
 	// Initialize repositories
-	outboxRepo := postgres.NewOutboxRepository(db)
+	baseRepo := postgres.NewBaseRepository(db)
+	outboxRepo := postgres.NewOutboxRepository(baseRepo)
 
 	// Initialize and start outbox processor
 	processor := worker.NewOutboxProcessor(
@@ -138,7 +161,11 @@ func main() {
 		broker,
 		cfg.Outbox.ToWorkerConfig(),
 		logger,
+		metrics.New("outbox_processor"),
 	)
+
+	// Setup health check endpoints
+	setupHealthCheck(logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -149,7 +176,7 @@ func main() {
 
 	go func() {
 		<-sigChan
-		logger.Info("Shutting down...")
+		logger.ZL.Info().Msg("Shutting down...")
 		cancel()
 	}()
 
@@ -160,18 +187,16 @@ func (w *EventWorker) Start(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	w.logger.Info("Worker started", zap.String("worker_id", w.workerID))
+	w.logger.ZL.Info().Str("worker_id", w.workerID).Msg("Worker started")
 
 	for {
 		select {
 		case <-ctx.Done():
-			w.logger.Info("Worker shutting down", zap.String("worker_id", w.workerID))
+			w.logger.ZL.Info().Str("worker_id", w.workerID).Msg("Worker shutting down")
 			return
 		case <-ticker.C:
 			if err := w.processEvents(ctx); err != nil {
-				w.logger.Error("Error processing events",
-					zap.Error(err),
-					zap.String("worker_id", w.workerID))
+				w.logger.ZL.Error().Err(err).Str("worker_id", w.workerID).Msg("Error processing events")
 			}
 		}
 	}
@@ -215,6 +240,7 @@ func (w *EventWorker) processEvents(ctx context.Context) error {
 			var publishErr error
 			for attempt := 0; attempt < w.maxRetries; attempt++ {
 				if attempt > 0 {
+					w.metrics.retryCount.WithLabelValues(evt.EventType).Inc()
 					backoff := time.Duration(attempt) * w.retryDelay
 					time.Sleep(backoff)
 				}
@@ -230,36 +256,30 @@ func (w *EventWorker) processEvents(ctx context.Context) error {
 					break
 				}
 
-				w.logger.Warn("Retry publishing event",
-					zap.String("event_id", evt.ID.String()),
-					zap.Int("attempt", attempt+1),
-					zap.Error(publishErr))
+				w.logger.ZL.Warn().Str("event_id", evt.ID.String()).Int("attempt", attempt+1).Err(publishErr).Msg("Retry publishing event")
 			}
 
 			if publishErr != nil {
 				w.metrics.failedEvents.Inc()
-				w.logger.Error("Failed to publish event after retries",
-					zap.String("event_id", evt.ID.String()),
-					zap.Error(publishErr))
+				w.logger.ZL.Error().Str("event_id", evt.ID.String()).Err(publishErr).Msg("Failed to publish event after retries")
 
 				errMsg := publishErr.Error()
 				retryAt := time.Now().Add(w.retryDelay * time.Duration(w.maxRetries))
 				if updateErr := w.outboxRepo.UpdateStatusTx(ctx, tx, evt.ID, "retry", &errMsg, &retryAt); updateErr != nil {
-					w.logger.Error("Failed to update event status",
-						zap.String("event_id", evt.ID.String()),
-						zap.Error(updateErr))
+					w.logger.ZL.Error().Str("event_id", evt.ID.String()).Err(updateErr).Msg("Failed to update event status")
 				}
 				continue
 			}
 
 			if err := w.outboxRepo.UpdateStatusTx(ctx, tx, evt.ID, "processed", nil, nil); err != nil {
-				w.logger.Error("Failed to mark event as processed",
-					zap.String("event_id", evt.ID.String()),
-					zap.Error(err))
+				w.logger.ZL.Error().Str("event_id", evt.ID.String()).Err(err).Msg("Failed to mark event as processed")
 				continue
 			}
 
 			w.metrics.processedEvents.Inc()
+
+			latency := time.Since(evt.CreatedAt).Seconds()
+			w.metrics.processingLatency.WithLabelValues(evt.EventType).Observe(latency)
 		}
 
 		// Update statuses in transaction

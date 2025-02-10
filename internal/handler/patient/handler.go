@@ -17,12 +17,12 @@ import (
 )
 
 type Handler struct {
-	service              patient.Service
+	service              patient.PatientService
 	outboxRepo           postgres.OutboxRepository
 	*handler.BaseHandler // Embed BaseHandler for region functionality
 }
 
-func NewHandler(service patient.Service, outboxRepo postgres.OutboxRepository, regionSvc *region.Service) *Handler {
+func NewHandler(service patient.PatientService, outboxRepo postgres.OutboxRepository, regionSvc *region.Service) *Handler {
 	return &Handler{
 		service:    service,
 		outboxRepo: outboxRepo,

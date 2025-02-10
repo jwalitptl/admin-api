@@ -33,6 +33,10 @@ func NewService(outboxRepo repository.OutboxRepository, broker messaging.Message
 	}
 }
 
+func (s *Service) CreateEvent(ctx context.Context, event *model.OutboxEvent) error {
+	return s.outboxRepo.Create(ctx, event)
+}
+
 func (s *Service) Emit(ctx context.Context, eventType string, payload interface{}) error {
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {

@@ -49,13 +49,31 @@ type EventTrackingConfig struct {
 type Config struct {
 	Server   ServerConfig   `yaml:"server"`
 	Database DatabaseConfig `yaml:"database"`
-	JWT      struct {
+	Email    struct {
+		Host     string `yaml:"host"`
+		Port     int    `yaml:"port"`
+		Username string `yaml:"username"`
+		Password string `yaml:"password"`
+		From     string `yaml:"from"`
+	} `yaml:"email"`
+	Audit struct {
+		RetentionDays int `yaml:"retention_days"`
+	} `yaml:"audit"`
+	GeoIP struct {
+		APIKey      string `yaml:"api_key"`
+		DatabaseURL string `yaml:"database_url"`
+	} `yaml:"geoip"`
+	JWT struct {
 		Secret        string `yaml:"secret"`
 		RefreshSecret string `yaml:"refresh_secret"`
 		ExpiryHours   int    `yaml:"expiry_hours"`
 	} `yaml:"jwt"`
 	Redis struct {
-		URL string `yaml:"url"`
+		URL          string        `yaml:"url"`
+		MaxRetries   int           `yaml:"max_retries"`
+		RetryBackoff time.Duration `yaml:"retry_backoff"`
+		PoolSize     int           `yaml:"pool_size"`
+		MinIdleConns int           `yaml:"min_idle_conns"`
 	} `yaml:"redis"`
 	EventTracking EventTrackingConfig `yaml:"event_tracking"`
 	RateLimit     struct {
@@ -170,5 +188,15 @@ func (c *RedisConfig) ToBrokerConfig() redis.Config {
 		RetryBackoff: c.RetryBackoff,
 		PoolSize:     c.PoolSize,
 		MinIdleConns: c.MinIdleConns,
+	}
+}
+
+func (c *Config) ToBrokerConfig() redis.Config {
+	return redis.Config{
+		URL:          c.Redis.URL,
+		MaxRetries:   c.Redis.MaxRetries,
+		RetryBackoff: c.Redis.RetryBackoff,
+		PoolSize:     c.Redis.PoolSize,
+		MinIdleConns: c.Redis.MinIdleConns,
 	}
 }

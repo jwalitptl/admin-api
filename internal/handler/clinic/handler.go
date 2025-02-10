@@ -13,15 +13,15 @@ import (
 	"github.com/jwalitptl/admin-api/pkg/event"
 
 	"github.com/jwalitptl/admin-api/internal/handler"
-	"github.com/jwalitptl/admin-api/internal/repository/postgres"
+	"github.com/jwalitptl/admin-api/internal/repository"
 )
 
 type Handler struct {
-	service    clinicService.Service
-	outboxRepo postgres.OutboxRepository
+	service    clinicService.ClinicServicer
+	outboxRepo repository.OutboxRepository
 }
 
-func NewHandler(service clinicService.Service, outboxRepo postgres.OutboxRepository) *Handler {
+func NewHandler(service clinicService.ClinicServicer, outboxRepo repository.OutboxRepository) *Handler {
 	return &Handler{service: service, outboxRepo: outboxRepo}
 }
 

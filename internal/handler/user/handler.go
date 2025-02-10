@@ -14,11 +14,11 @@ import (
 )
 
 type Handler struct {
-	service user.Service
+	service user.UserServicer
 	db      *sqlx.DB
 }
 
-func NewHandler(service user.Service, db *sqlx.DB) *Handler {
+func NewHandler(service user.UserServicer, db *sqlx.DB) *Handler {
 	return &Handler{service: service, db: db}
 }
 

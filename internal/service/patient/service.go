@@ -13,6 +13,17 @@ import (
 	"github.com/google/uuid"
 )
 
+type PatientService interface {
+	CreatePatient(ctx context.Context, patient *model.Patient) error
+	GetPatient(ctx context.Context, id uuid.UUID) (*model.Patient, error)
+	UpdatePatient(ctx context.Context, patient *model.Patient) error
+	DeletePatient(ctx context.Context, id uuid.UUID) error
+	ListPatients(ctx context.Context, filters *model.PatientFilters) ([]*model.Patient, error)
+	CreateAppointment(ctx context.Context, appointment *model.CreateAppointmentRequest) (*model.Appointment, error)
+	CancelAppointment(ctx context.Context, appointmentID uuid.UUID, reason string) error
+	ListAppointments(ctx context.Context, patientID uuid.UUID, filters *model.AppointmentFilters) ([]*model.Appointment, error)
+}
+
 type Service struct {
 	repo            repository.PatientRepository
 	auditor         *audit.Service

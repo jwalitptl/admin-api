@@ -124,8 +124,10 @@ type (
 	}
 
 	OutboxRepository interface {
-		Create(ctx context.Context, event *model.OutboxEvent) error
+		GetPendingEvents(ctx context.Context, limit int) ([]*model.OutboxEvent, error)
 		GetPendingEventsWithLock(ctx context.Context, limit int) ([]*model.OutboxEvent, error)
+		Create(ctx context.Context, event *model.OutboxEvent) error
+		UpdateStatus(ctx context.Context, id uuid.UUID, status model.OutboxStatus, err *string) error
 		BeginTx(ctx context.Context) (*sql.Tx, error)
 		UpdateStatusTx(ctx context.Context, tx *sql.Tx, id uuid.UUID, status string, errorMessage *string, retryAt *time.Time) error
 		MoveToDeadLetter(ctx context.Context, tx *sql.Tx, event *model.OutboxEvent) error

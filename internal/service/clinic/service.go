@@ -12,6 +12,14 @@ import (
 	"github.com/jwalitptl/admin-api/internal/service/audit"
 )
 
+type ClinicServicer interface {
+	CreateClinic(ctx context.Context, clinic *model.Clinic) error
+	GetClinic(ctx context.Context, id uuid.UUID) (*model.Clinic, error)
+	UpdateClinic(ctx context.Context, clinic *model.Clinic) error
+	DeleteClinic(ctx context.Context, id uuid.UUID) error
+	ListClinics(ctx context.Context, organizationID uuid.UUID) ([]*model.Clinic, error)
+}
+
 type Service struct {
 	repo    repository.ClinicRepository
 	auditor *audit.Service

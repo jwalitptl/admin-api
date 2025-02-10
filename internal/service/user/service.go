@@ -22,6 +22,20 @@ const (
 	verifyTokenExpiry = 48 * time.Hour
 )
 
+type UserServicer interface {
+	CreateUser(ctx context.Context, user *model.User) error
+	GetUser(ctx context.Context, id uuid.UUID) (*model.User, error)
+	UpdateUser(ctx context.Context, user *model.User) error
+	DeleteUser(ctx context.Context, id uuid.UUID) error
+	ListUsers(ctx context.Context, filters *model.UserFilters) ([]*model.User, error)
+	AssignToClinic(ctx context.Context, userID, clinicID uuid.UUID) error
+	RemoveFromClinic(ctx context.Context, userID, clinicID uuid.UUID) error
+	ListUserClinics(ctx context.Context, userID uuid.UUID) ([]*model.Clinic, error)
+	AssignRole(ctx context.Context, userID, roleID uuid.UUID) error
+	RemoveRole(ctx context.Context, userID, roleID uuid.UUID) error
+	ListUserRoles(ctx context.Context, userID uuid.UUID) ([]*model.Role, error)
+}
+
 type Service struct {
 	repo      repository.UserRepository
 	emailSvc  email.Service

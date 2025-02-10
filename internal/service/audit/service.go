@@ -11,6 +11,13 @@ import (
 	"github.com/jwalitptl/admin-api/internal/repository"
 )
 
+type AuditService interface {
+	Log(ctx context.Context, userID, orgID uuid.UUID, action, entityType string, entityID uuid.UUID, opts *LogOptions) error
+	ListWithPagination(ctx context.Context, filters map[string]interface{}) ([]*model.AuditLog, int64, error)
+	List(ctx context.Context, filters map[string]interface{}) ([]*model.AuditLog, error)
+	GetAggregateStats(ctx context.Context, filters map[string]interface{}) (*model.AggregateStats, error)
+}
+
 type Service struct {
 	repo repository.AuditRepository
 }
