@@ -20,6 +20,7 @@ import (
 	rbacHandler "github.com/jwalitptl/admin-api/internal/handler/rbac"
 	"github.com/jwalitptl/admin-api/internal/handler/user"
 	"github.com/jwalitptl/admin-api/internal/middleware"
+	"github.com/jwalitptl/admin-api/internal/repository"
 	pkg_event "github.com/jwalitptl/admin-api/pkg/event"
 )
 
@@ -48,6 +49,7 @@ type Router struct {
 	userHandler       EventHandler
 	regionValidation  *middleware.RegionValidationMiddleware
 	metrics           *routerMetrics
+	repos             *Repositories
 }
 
 type routerMetrics struct {
@@ -81,7 +83,12 @@ type Config struct {
 	EventTracker        *pkg_event.EventTrackerMiddleware
 }
 
-func NewRouter(config Config) *Router {
+type Repositories struct {
+	RBAC  repository.RBACRepository
+	Audit repository.AuditRepository
+}
+
+func NewRouter(config Config, repos *Repositories) *Router {
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
 
@@ -100,6 +107,7 @@ func NewRouter(config Config) *Router {
 		eventTracker:      config.EventTracker,
 		userHandler:       config.UserHandler,
 		regionValidation:  config.RegionValidation,
+		repos:             repos,
 	}
 }
 

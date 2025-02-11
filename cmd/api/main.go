@@ -72,11 +72,11 @@ func main() {
 
 	// Initialize database
 	dbURL := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		"localhost",
+		"localhost", // Change to localhost since we're using port forwarding
 		cfg.Database.Port,
 		cfg.Database.User,
 		cfg.Database.Password,
-		"admin_db",
+		cfg.Database.Name,
 		cfg.Database.SSLMode,
 	)
 	db, err := sqlx.Connect("postgres", dbURL)
@@ -137,6 +137,11 @@ func main() {
 	// Initialize event tracking middleware
 	eventTracker := pkg_event.NewEventTrackerMiddleware(eventSvc)
 
+	repos := &router.Repositories{
+		RBAC:  rbacRepo,
+		Audit: auditRepo,
+	}
+
 	// Initialize router
 	r := router.NewRouter(router.Config{
 		AuthMiddleware:      middleware.NewAuthMiddleware(rbacSvc, authSvc),
@@ -152,7 +157,7 @@ func main() {
 		PermissionHandler:   permissionHandler.NewHandler(permSvc, outboxRepo),
 		PatientHandler:      patient.NewHandler(patientSvc, outboxRepo, regionSvc),
 		EventTracker:        eventTracker,
-	})
+	}, repos)
 
 	// Setup routes
 	r.Setup()

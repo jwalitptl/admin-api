@@ -1,4 +1,4 @@
-.PHONY: test test-worker test-auth test-patient test-clinic test-coverage dev
+.PHONY: test test-worker test-auth test-patient test-clinic test-coverage dev migrate-up migrate-down
 
 # Test configuration
 TEST_FLAGS := -v -race
@@ -49,55 +49,32 @@ test-clean: ## Clean test cache
 # New commands
 all: dev
 
-dev: ## Run everything in development mode
-	@echo "🚀 Starting development environment..."
-	
+dev: ## Start development environment
+	@echo "Starting development environment..."
 	@echo "🧹 Cleaning up previous instances..."
+	@make stop
+	@lsof -ti:8081 | xargs kill -9 2>/dev/null || true
 	@$(DOCKER_COMPOSE) down -v 2>/dev/null || true
-	@pkill -f "$(APP_NAME)" 2>/dev/null || true
-	@lsof -ti:$(PORT) | xargs kill -9 2>/dev/null || true
 	
 	@echo "🐳 Starting Docker services..."
-	@$(DOCKER_COMPOSE) up -d postgres redis
+	@docker-compose up -d postgres redis
 	
 	@echo "⏳ Waiting for database..."
 	@until docker exec admin-api-postgres-1 pg_isready -U $(DB_USER) > /dev/null 2>&1; do \
 		sleep 1; \
 	done
 	
-	@echo "🔄 Running migrations..."
-	@docker exec -i admin-api-postgres-1 psql -U $(DB_USER) -c "DROP DATABASE IF EXISTS $(DB_NAME);" 2>/dev/null || true
-	@docker exec -i admin-api-postgres-1 psql -U $(DB_USER) -c "CREATE DATABASE $(DB_NAME);"
-	@for f in migrations/*.up.sql; do \
-		echo "Applying $$f..."; \
-		docker exec -i admin-api-postgres-1 psql -U $(DB_USER) -d $(DB_NAME) < $$f; \
-	done
+	@make migrate-down || true
+	@make migrate-up
+	@sleep 5
 	
-	@echo "🚀 Starting API server..."
+	@echo "🚀 Starting services..."
 	@go run cmd/api/main.go > api.log 2>&1 & echo $$! > api.pid
-	@echo "🚀 Starting worker..."
-	@go run cmd/worker/main.go > worker.log 2>&1 & echo $$! > worker.pid
-	
-	@echo "⏳ Waiting for API server..."
-	@for i in {1..30}; do \
-		if curl -s http://localhost:$(PORT)/health > /dev/null; then \
-			echo "✅ API server is ready!"; \
-			break; \
-		fi; \
-		if [ $$i -eq 30 ]; then \
-			echo "❌ API server failed to start"; \
-			cat api.log; \
-			exit 1; \
-		fi; \
-		sleep 1; \
-	done
-	
+	@sleep 5
 	@echo "🧪 Running API tests..."
 	@chmod +x scripts/test_api.sh
-	@./scripts/test_api.sh
-	
-	@echo "✨ Development environment is ready!"
-	@echo "📝 Logs available in api.log and worker.log"
+	@./scripts/test_api.sh || (make stop && exit 1)
+	@wait
 	@echo "💡 Use 'make stop' to stop all services"
 
 stop: ## Stop all services
@@ -109,7 +86,7 @@ stop: ## Stop all services
 clean: stop ## Clean up everything
 	@lsof -ti:8080 | xargs kill -9 2>/dev/null || true
 	@lsof -ti:8081 | xargs kill -9 2>/dev/null || true
-	@rm -f $(COVERAGE_FILE) $(COVERAGE_HTML) api.log worker.log || true
+	@rm -f $(COVERAGE_FILE) $(COVERAGE_HTML) api.log || true
 	@if [ -n "$$(docker volume ls -q)" ]; then \
 		$(DOCKER_COMPOSE) down -v || true
 		docker volume rm $$(docker volume ls -q) 2>/dev/null || true; \
@@ -122,4 +99,20 @@ api-test: ## Run API tests
 
 run-all: clean start api-test ## Run everything from scratch
 	@echo "All tests completed"
-	@make stop 
+	@make stop
+
+# Add these new targets
+migrate-up: ## Run database migrations up
+	@echo "Running migrations up..."
+	@docker exec -i admin-api-postgres-1 psql -U $(DB_USER) -c "CREATE DATABASE $(DB_NAME);" 2>/dev/null || true
+	@for f in migrations/*.up.sql; do \
+		echo "Applying $$f..."; \
+		docker exec -i admin-api-postgres-1 psql -U $(DB_USER) -d $(DB_NAME) < $$f; \
+	done
+
+migrate-down: ## Run database migrations down
+	@echo "Running migrations down..."
+	@for f in migrations/*.down.sql; do \
+		echo "Rolling back $$f..."; \
+		docker exec -i admin-api-postgres-1 psql -U $(DB_USER) -d $(DB_NAME) < $$f; \
+	done 2>/dev/null || true 

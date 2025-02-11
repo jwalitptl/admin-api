@@ -4,6 +4,7 @@ CREATE TABLE roles (
     description TEXT,
     organization_id UUID REFERENCES organizations(id),
     is_system_role BOOLEAN DEFAULT FALSE,
+    region_code VARCHAR(10),
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
     deleted_at TIMESTAMP
