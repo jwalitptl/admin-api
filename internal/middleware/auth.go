@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"log"
 	"net/http"
 	"strings"
 
@@ -26,6 +27,7 @@ func NewAuthMiddleware(rbacService rbac.Service, authSvc *auth.Service) *AuthMid
 func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := c.GetHeader("Authorization")
+		log.Printf("Auth token received: %s", token)
 		if token == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing token"})
 			c.Abort()
@@ -36,16 +38,21 @@ func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 		if len(token) > 7 && token[:7] == "Bearer " {
 			token = token[7:]
 		}
+		log.Printf("Validating token: %s", token)
 
 		claims, err := m.authSvc.ValidateToken(c.Request.Context(), token)
 		if err != nil {
+			log.Printf("Token validation failed: %v", err)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 			c.Abort()
 			return
 		}
 
+		log.Printf("Token claims: %+v", claims)
+
 		// Set claims in context
 		c.Set("user_id", claims.UserID)
+		log.Printf("Setting user_id in context: %#v", claims.UserID)
 		c.Set("email", claims.Email)
 		c.Set("organization_id", claims.OrganizationID)
 

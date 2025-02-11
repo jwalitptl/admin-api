@@ -117,24 +117,20 @@ func (s *Service) ValidateToken(ctx context.Context, token string) (*model.Token
 		return nil, fmt.Errorf("invalid token: %w", err)
 	}
 
+	log.Printf("Raw claims from JWT: %+v", claims)
 	userID, ok := claims["user_id"].(string)
 	if !ok {
+		log.Printf("Failed to get user_id as string from claims")
 		return nil, fmt.Errorf("invalid token claims")
 	}
 
-	email, ok := claims["email"].(string)
-	if !ok {
-		return nil, fmt.Errorf("invalid token claims")
-	}
-
-	parsedUserID, err := uuid.Parse(userID)
-	if err != nil {
-		return nil, fmt.Errorf("invalid user ID in token")
-	}
+	log.Printf("User ID from claims (string): %s", userID)
 
 	return &model.TokenClaims{
-		UserID: parsedUserID,
-		Email:  email,
+		UserID:         userID,
+		Email:          claims["email"].(string),
+		OrganizationID: claims["organization_id"].(string),
+		Type:           claims["type"].(string),
 	}, nil
 }
 
@@ -144,7 +140,12 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (*model
 		return nil, fmt.Errorf("invalid refresh token: %w", err)
 	}
 
-	user, err := s.userRepo.Get(ctx, claims.UserID)
+	userID, err := uuid.Parse(claims.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user ID in token")
+	}
+
+	user, err := s.userRepo.Get(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("user not found: %w", err)
 	}

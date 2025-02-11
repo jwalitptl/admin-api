@@ -2,6 +2,7 @@ package user
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -26,6 +27,7 @@ func (h *Handler) RegisterRoutesWithEvents(r *gin.RouterGroup, eventTracker *eve
 	fmt.Println("DEBUG: Registering user routes with events")
 	users := r.Group("/users")
 	{
+		users.GET("/me", h.GetMe)
 		users.POST("", eventTracker.TrackEvent("user", "create"), h.CreateUser)
 		users.PUT("/:id", eventTracker.TrackEvent("user", "update"), h.UpdateUser)
 		users.DELETE("/:id", eventTracker.TrackEvent("user", "delete"), h.DeleteUser)
@@ -93,16 +95,33 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 		return
 	}
 
+	// Validate required fields
+	if req.FirstName == nil || req.LastName == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "first_name and last_name are required"})
+		return
+	}
+
 	user := &model.User{
-		Base:   model.Base{ID: id},
-		Name:   *req.Name,
-		Email:  *req.Email,
-		Status: *req.Status,
-		Type:   *req.Type,
+		Base:      model.Base{ID: id},
+		Email:     req.Email,
+		Type:      req.Type,
+		Status:    req.Status,
+		FirstName: req.FirstName,
+		LastName:  req.LastName,
+		Phone:     req.Phone,
+	}
+
+	if req.OrganizationID != "" {
+		orgID, err := uuid.Parse(req.OrganizationID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid organization ID"})
+			return
+		}
+		user.OrganizationID = orgID
 	}
 
 	if err := h.service.UpdateUser(c.Request.Context(), user); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to update user: %v", err)})
 		return
 	}
 
@@ -282,4 +301,38 @@ func (h *Handler) ListUserClinics(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": clinics})
+}
+
+func (h *Handler) GetMe(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		log.Printf("GetMe: user_id not found in context")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found in context"})
+		return
+	}
+
+	log.Printf("GetMe: userID from context: %T %v", userID, userID)
+	log.Printf("GetMe: raw userID value: %#v", userID)
+
+	uidStr, ok := userID.(string)
+	if !ok {
+		log.Printf("GetMe: failed type assertion, actual type: %T", userID)
+		log.Printf("GetMe: failed value: %#v", userID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("invalid user ID type: got %T, want string", userID)})
+		return
+	}
+
+	uid, err := uuid.Parse(uidStr)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user ID format"})
+		return
+	}
+
+	user, err := h.service.GetUser(c.Request.Context(), uid)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": user})
 }

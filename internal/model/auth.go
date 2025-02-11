@@ -42,10 +42,10 @@ var (
 // TokenClaims represents JWT claims
 type TokenClaims struct {
 	jwt.StandardClaims
-	UserID         uuid.UUID `json:"user_id"`
-	OrganizationID uuid.UUID `json:"organization_id"`
-	Email          string    `json:"email"`
-	Type           string    `json:"type"`
-	Roles          []string  `json:"roles"`
-	Permissions    []string  `json:"permissions"`
+	UserID         string   `json:"user_id"`
+	OrganizationID string   `json:"organization_id"`
+	Email          string   `json:"email"`
+	Type           string   `json:"type"`
+	Roles          []string `json:"roles"`
+	Permissions    []string `json:"permissions"`
 }

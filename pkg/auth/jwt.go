@@ -2,6 +2,7 @@ package auth
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -63,6 +64,7 @@ func (s *jwtService) ValidateToken(token string) (map[string]interface{}, error)
 	}
 
 	if claims, ok := parsedToken.Claims.(jwt.MapClaims); ok && parsedToken.Valid {
+		log.Printf("JWT Validation: claims=%#v", claims)
 		return claims, nil
 	}
 	return nil, fmt.Errorf("invalid token")
@@ -90,7 +92,7 @@ func (s *jwtService) ValidateRefreshToken(token string) (*model.TokenClaims, err
 	}
 
 	return &model.TokenClaims{
-		UserID: parsedUserID,
+		UserID: parsedUserID.String(),
 		Email:  email,
 	}, nil
 }

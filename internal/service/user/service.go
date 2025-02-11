@@ -34,6 +34,7 @@ type UserServicer interface {
 	AssignRole(ctx context.Context, userID, roleID uuid.UUID) error
 	RemoveRole(ctx context.Context, userID, roleID uuid.UUID) error
 	ListUserRoles(ctx context.Context, userID uuid.UUID) ([]*model.Role, error)
+	Get(ctx context.Context, id uuid.UUID) (*model.User, error)
 }
 
 type Service struct {
@@ -236,4 +237,8 @@ func (s *Service) RemoveFromClinic(ctx context.Context, userID, clinicID uuid.UU
 func (s *Service) ListUserClinics(ctx context.Context, userID uuid.UUID) ([]*model.Clinic, error) {
 	// Implementation of ListUserClinics method
 	return nil, nil
+}
+
+func (s *Service) Get(ctx context.Context, id uuid.UUID) (*model.User, error) {
+	return s.repo.Get(ctx, id)
 }

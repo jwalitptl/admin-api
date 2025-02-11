@@ -71,14 +71,14 @@ type CreateUserRequest struct {
 
 // UpdateUserRequest represents user update parameters
 type UpdateUserRequest struct {
-	Name      *string `json:"name"`
-	FirstName *string `json:"first_name"`
-	LastName  *string `json:"last_name"`
-	Email     *string `json:"email" binding:"omitempty,email"`
-	Phone     *string `json:"phone"`
-	Status    *string `json:"status" binding:"omitempty,oneof=active inactive pending locked"`
-	Type      *string `json:"type" binding:"omitempty,oneof=admin doctor nurse staff patient"`
-	Settings  JSONMap `json:"settings"`
+	FirstName      *string `json:"first_name" binding:"required"`
+	LastName       *string `json:"last_name" binding:"required"`
+	Email          string  `json:"email" binding:"required,email"`
+	Type           string  `json:"type" binding:"required"`
+	Status         string  `json:"status" binding:"required"`
+	Phone          *string `json:"phone"`
+	OrganizationID string  `json:"organization_id" binding:"required"`
+	Settings       JSONMap `json:"settings"`
 }
 
 type UserFilters struct {
