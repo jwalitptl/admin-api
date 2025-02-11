@@ -200,3 +200,10 @@ func (c *Config) ToBrokerConfig() redis.Config {
 		MinIdleConns: c.Redis.MinIdleConns,
 	}
 }
+
+func Load(cfg *Config) error {
+	if err := viper.ReadInConfig(); err != nil {
+		return fmt.Errorf("failed to read config: %w", err)
+	}
+	return viper.Unmarshal(cfg)
+}

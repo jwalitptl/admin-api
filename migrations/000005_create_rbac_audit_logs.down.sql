@@ -1,1 +1,0 @@
-DROP TABLE IF EXISTS rbac_audit_logs; 

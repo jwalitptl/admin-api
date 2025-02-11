@@ -130,11 +130,11 @@ func main() {
 
 	// Initialize database
 	dbURL := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		cfg.Database.Host,
+		"localhost",
 		cfg.Database.Port,
 		cfg.Database.User,
 		cfg.Database.Password,
-		cfg.Database.Name,
+		"admin_db",
 		cfg.Database.SSLMode,
 	)
 	db, err := sqlx.Connect("postgres", dbURL)
@@ -145,9 +145,9 @@ func main() {
 	defer db.Close()
 
 	// Initialize Redis broker
-	broker, err := redis.NewRedisBroker(cfg.ToBrokerConfig(), logger)
+	broker, err := redis.NewRedisBroker(cfg.ToBrokerConfig(), &log.Logger)
 	if err != nil {
-		logger.ZL.Fatal().Err(err).Msg("Failed to create Redis broker")
+		log.Fatal().Err(err).Msg("Failed to create Redis broker")
 	}
 	defer broker.Close()
 

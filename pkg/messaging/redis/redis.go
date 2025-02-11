@@ -7,15 +7,15 @@ import (
 	"time"
 
 	"github.com/jwalitptl/admin-api/pkg/circuitbreaker"
-	"github.com/jwalitptl/admin-api/pkg/logger"
 	"github.com/jwalitptl/admin-api/pkg/messaging"
 	"github.com/redis/go-redis/v9"
+	"github.com/rs/zerolog"
 )
 
 type RedisBroker struct {
 	client *redis.Client
 	cb     *circuitbreaker.CircuitBreaker
-	logger *logger.Logger
+	logger *zerolog.Logger
 }
 
 type Config struct {
@@ -26,7 +26,7 @@ type Config struct {
 	MinIdleConns int
 }
 
-func NewRedisBroker(config Config, logger *logger.Logger) (messaging.Broker, error) {
+func NewRedisBroker(config Config, logger *zerolog.Logger) (messaging.Broker, error) {
 	opts, err := redis.ParseURL(config.URL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse Redis URL: %w", err)

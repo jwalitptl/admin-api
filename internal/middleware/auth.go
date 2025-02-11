@@ -27,30 +27,27 @@ func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := c.GetHeader("Authorization")
 		if token == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": "missing authorization header",
-			})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing token"})
+			c.Abort()
 			return
 		}
 
-		// Remove Bearer prefix
-		token = strings.TrimPrefix(token, "Bearer ")
+		// Remove "Bearer " prefix if present
+		if len(token) > 7 && token[:7] == "Bearer " {
+			token = token[7:]
+		}
 
 		claims, err := m.authSvc.ValidateToken(c.Request.Context(), token)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": "invalid token",
-			})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+			c.Abort()
 			return
 		}
 
-		// Add claims to context
+		// Set claims in context
 		c.Set("user_id", claims.UserID)
 		c.Set("email", claims.Email)
-		c.Set("user_type", claims.Type)
 		c.Set("organization_id", claims.OrganizationID)
-		c.Set("roles", claims.Roles)
-		c.Set("permissions", claims.Permissions)
 
 		c.Next()
 	}

@@ -13,20 +13,11 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/spf13/viper"
 
 	"github.com/jwalitptl/admin-api/internal/config"
-	"github.com/jwalitptl/admin-api/internal/handler"
-	"github.com/jwalitptl/admin-api/internal/handler/account"
-	"github.com/jwalitptl/admin-api/internal/handler/appointment"
-	auditHandler "github.com/jwalitptl/admin-api/internal/handler/audit"
-	authHandler "github.com/jwalitptl/admin-api/internal/handler/auth"
-	"github.com/jwalitptl/admin-api/internal/handler/clinic"
 	"github.com/jwalitptl/admin-api/internal/handler/health"
-	"github.com/jwalitptl/admin-api/internal/handler/patient"
-	permissionHandler "github.com/jwalitptl/admin-api/internal/handler/permission"
 	"github.com/jwalitptl/admin-api/internal/handler/prometheus"
-	rbacHandler "github.com/jwalitptl/admin-api/internal/handler/rbac"
-	"github.com/jwalitptl/admin-api/internal/handler/user"
 	"github.com/jwalitptl/admin-api/internal/middleware"
 	"github.com/jwalitptl/admin-api/internal/model"
 	"github.com/jwalitptl/admin-api/internal/repository/postgres"
@@ -47,37 +38,45 @@ import (
 	pkg_event "github.com/jwalitptl/admin-api/pkg/event"
 	"github.com/jwalitptl/admin-api/pkg/messaging"
 	"github.com/jwalitptl/admin-api/pkg/messaging/redis"
-	"github.com/jwalitptl/admin-api/pkg/metrics"
-	"github.com/jwalitptl/admin-api/pkg/worker"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/sdk/trace"
 
+	"github.com/jwalitptl/admin-api/internal/handler/account"
+	"github.com/jwalitptl/admin-api/internal/handler/appointment"
+	authHandler "github.com/jwalitptl/admin-api/internal/handler/auth"
+	"github.com/jwalitptl/admin-api/internal/handler/clinic"
+	"github.com/jwalitptl/admin-api/internal/handler/organization"
+	"github.com/jwalitptl/admin-api/internal/handler/patient"
+	permissionHandler "github.com/jwalitptl/admin-api/internal/handler/permission"
+	rbacHandler "github.com/jwalitptl/admin-api/internal/handler/rbac"
+	"github.com/jwalitptl/admin-api/internal/handler/user"
 	pkg_auth "github.com/jwalitptl/admin-api/pkg/auth"
-	"github.com/jwalitptl/admin-api/pkg/logger"
 )
 
 func main() {
-	// Initialize zerolog
-	log.Logger = zerolog.New(os.Stdout).With().Timestamp().Logger()
+	// Set config file path
+	viper.SetConfigName("config")
+	viper.SetConfigType("yml")
+	viper.AddConfigPath("internal/config") // Look for config in internal/config directory
+
+	// Initialize logger
+	logger := log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
 	// Load configuration
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		log.Fatal().Err(err).Msg("failed to load configuration")
+	var cfg config.Config
+	if err := config.Load(&cfg); err != nil {
+		logger.Fatal().Err(err).Msg("failed to load configuration")
 	}
-
-	// After loading config
-	log.Debug().Interface("event_tracking", cfg.EventTracking).Msg("loaded config")
 
 	// Initialize database
 	dbURL := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		cfg.Database.Host,
+		"localhost",
 		cfg.Database.Port,
 		cfg.Database.User,
 		cfg.Database.Password,
-		cfg.Database.Name,
+		"admin_db",
 		cfg.Database.SSLMode,
 	)
 	db, err := sqlx.Connect("postgres", dbURL)
@@ -86,7 +85,7 @@ func main() {
 	}
 	defer db.Close()
 
-	// Initialize repositories first
+	// Initialize repositories
 	baseRepo := postgres.NewBaseRepository(db)
 	accountRepo := postgres.NewAccountRepository(baseRepo)
 	organizationRepo := postgres.NewOrganizationRepository(baseRepo)
@@ -104,7 +103,7 @@ func main() {
 	notificationRepo := postgres.NewNotificationRepository(baseRepo)
 	medicalRecordRepo := postgres.NewMedicalRecordRepository(baseRepo)
 
-	// Initialize core services first
+	// Initialize core services
 	emailSvc := email.NewService(cfg.Email)
 	auditSvc := audit.NewService(auditRepo)
 	jwtSvc := pkg_auth.NewJWTService(cfg.JWT.Secret)
@@ -113,15 +112,14 @@ func main() {
 
 	// Initialize broker
 	redisConfig := redis.Config{
-		URL: "redis://redis:6379/0",
+		URL: cfg.Redis.URL,
 	}
-	redisLogger := &logger.Logger{ZL: log.Logger}
-	broker, err := redis.NewRedisBroker(redisConfig, redisLogger)
+	broker, err := redis.NewRedisBroker(redisConfig, &logger)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to connect to Redis")
 	}
 
-	// Initialize event service first since other services depend on it
+	// Initialize event service
 	eventSvc := pkg_event.NewService(outboxRepo, messaging.NewBrokerAdapter(broker), auditSvc)
 
 	// Initialize business services
@@ -139,138 +137,73 @@ func main() {
 	// Initialize event tracking middleware
 	eventTracker := pkg_event.NewEventTrackerMiddleware(eventSvc)
 
-	// Initialize handlers with correct dependencies
-	h := handler.NewHandler()
-	accountHandler := account.NewHandler(accountSvc)
-	authHandler := authHandler.NewHandler(authSvc)
-	clinicHandler := clinic.NewHandler(clinicSvc, outboxRepo)
-	userHandler := user.NewHandler(userSvc, db)
-	rbacHandler := rbacHandler.NewHandler(rbacSvc, outboxRepo)
-	appointmentHandler := appointment.NewHandler(appointmentSvc, outboxRepo)
-	permHandler := permissionHandler.NewHandler(permSvc, outboxRepo)
-	patientHandler := patient.NewHandler(patientSvc, outboxRepo, regionSvc)
-	auditHandler := auditHandler.NewHandler(auditSvc)
-
-	// Initialize middleware
-	authMiddleware := middleware.NewAuthMiddleware(rbacSvc, authSvc)
-	hipaaMiddleware := middleware.NewHIPAAMiddleware(auditSvc)
-
-	// Initialize region middleware
-	regionMiddleware := middleware.NewRegionMiddleware(regionSvc, middleware.RegionConfig{
-		RequireRegion: true,
+	// Initialize router
+	r := router.NewRouter(router.Config{
+		AuthMiddleware:      middleware.NewAuthMiddleware(rbacSvc, authSvc),
+		RegionMiddleware:    middleware.NewRegionMiddleware(regionSvc, middleware.RegionConfig{RequireRegion: true}),
+		RegionValidation:    middleware.NewRegionValidationMiddleware(defaultConfig),
+		AccountHandler:      account.NewHandler(accountSvc),
+		OrganizationHandler: organization.NewHandler(accountSvc),
+		AuthHandler:         authHandler.NewHandler(authSvc),
+		ClinicHandler:       clinic.NewHandler(clinicSvc, outboxRepo),
+		UserHandler:         user.NewHandler(userSvc, db),
+		RBACHandler:         rbacHandler.NewHandler(rbacSvc, outboxRepo),
+		AppointmentHandler:  appointment.NewHandler(appointmentSvc, outboxRepo),
+		PermissionHandler:   permissionHandler.NewHandler(permSvc, outboxRepo),
+		PatientHandler:      patient.NewHandler(patientSvc, outboxRepo, regionSvc),
+		EventTracker:        eventTracker,
 	})
-	regionValidation := middleware.NewRegionValidationMiddleware(defaultConfig)
 
-	// Setup router
-	r := router.NewRouter(
-		router.Config{
-			AuthMiddleware:     authMiddleware,
-			HIPAAMiddleware:    hipaaMiddleware,
-			RegionMiddleware:   regionMiddleware,
-			RegionValidation:   regionValidation,
-			AccountHandler:     accountHandler,
-			AuthHandler:        authHandler,
-			ClinicHandler:      clinicHandler,
-			UserHandler:        userHandler,
-			RBACHandler:        rbacHandler,
-			AppointmentHandler: appointmentHandler,
-			PermissionHandler:  permHandler,
-			PatientHandler:     patientHandler,
-			BaseHandler:        h,
-			EventTracker:       eventTracker,
-		},
-	)
+	// Setup routes
+	r.Setup()
 
-	// Initialize rate limiter
+	// Register health check routes
+	healthHandler := health.NewHandler(db)
+	healthHandler.RegisterRoutes(r.Engine().Group(""))
+
+	// Add middleware
+	r.Engine().Use(middleware.Logger())
+	r.Engine().Use(middleware.ErrorHandler())
+
+	// Add rate limiter
 	rateLimiter := middleware.NewRateLimiter(middleware.RateLimiterConfig{
 		RPS:   cfg.RateLimit.RequestsPerSecond,
 		Burst: cfg.RateLimit.Burst,
 	})
-
-	// Add middlewares
-	r.Use(middleware.Logger())
-	r.Use(middleware.ErrorHandler())
 	if cfg.RateLimit.Enabled {
-		r.Use(rateLimiter.RateLimit())
+		r.Engine().Use(rateLimiter.RateLimit())
 	}
 
-	// Add health check routes
-	healthHandler := health.NewHandler(db)
-	healthHandler.RegisterRoutes(r.Engine().Group("/"))
-
-	// Add metrics if enabled
+	// Add metrics
 	if cfg.Monitoring.PrometheusEnabled {
 		p := prometheus.New()
 		r.Use(p.Middleware())
 		r.GET(cfg.Monitoring.MetricsPath, p.Handler())
 	}
 
-	// Register routes after router creation
-	r.Setup()
-
-	// Initialize and start outbox processor with broker
-	outboxConfig := worker.OutboxProcessorConfig{
-		BatchSize:     100,
-		PollInterval:  time.Second,
-		RetryAttempts: 3,
-		RetryDelay:    time.Minute,
-	}
-	outboxProcessor := worker.NewOutboxProcessor(
-		outboxRepo,
-		broker,
-		outboxConfig,
-		&logger.Logger{ZL: log.Logger},
-		metrics.New("outbox_processor"),
-	)
-	processorCtx, processorCancel := context.WithCancel(context.Background())
-	defer processorCancel()
-	go outboxProcessor.Start(processorCtx)
-
-	// Initialize audit cleanup worker
-	auditCleanup := worker.NewAuditCleanupWorker(
-		auditRepo,
-		cfg.Audit.RetentionDays,
-		24*time.Hour, // Run cleanup daily
-	)
-
-	// Start audit cleanup worker
-	go auditCleanup.Start(processorCtx)
-
-	// Register audit routes
-	r.Engine().Group("/audit").Use(authMiddleware.Authenticate()).
-		Use(authMiddleware.RequireRole(model.UserTypeAdmin)).
-		GET("/logs", auditHandler.ListLogs)
-
-	// Create server
-	srv := &http.Server{
-		Addr:           fmt.Sprintf(":%d", cfg.Server.Port),
-		Handler:        r.Engine(),
-		ReadTimeout:    15 * time.Second,
-		WriteTimeout:   15 * time.Second,
-		IdleTimeout:    60 * time.Second,
-		MaxHeaderBytes: 1 << 20, // 1MB
-	}
-
 	// Start server
+	srv := &http.Server{
+		Addr:    ":8081", // Use a different port temporarily
+		Handler: r,
+	}
+
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal().Err(err).Msg("failed to start server")
 		}
 	}()
 
-	// Wait for interrupt signal to gracefully shutdown the server
+	// Wait for interrupt signal to gracefully shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	log.Info().Msg("shutting down server...")
 
+	// Shutdown server
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatal().Err(err).Msg("server forced to shutdown")
 	}
-
-	log.Info().Msg("server exited properly")
 
 	// Initialize tracer
 	tp, err := initTracer()

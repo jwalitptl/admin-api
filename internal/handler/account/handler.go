@@ -2,6 +2,7 @@ package account
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -26,21 +27,10 @@ func (h *Handler) RegisterRoutesWithEvents(r *gin.RouterGroup, eventTracker *eve
 	accounts := r.Group("/accounts")
 	{
 		accounts.POST("", eventTracker.TrackEvent("account", "create"), h.CreateAccount)
+		accounts.GET("/:id", h.GetAccount)
 		accounts.PUT("/:id", eventTracker.TrackEvent("account", "update"), h.UpdateAccount)
 		accounts.DELETE("/:id", eventTracker.TrackEvent("account", "delete"), h.DeleteAccount)
 		accounts.GET("", h.ListAccounts)
-		accounts.GET("/:id", h.GetAccount)
-
-		// Organization routes
-		accounts.POST("/:id/organizations", eventTracker.TrackEvent("organization", "create"), h.CreateOrganization)
-		accounts.GET("/:id/organizations", h.ListOrganizations)
-	}
-
-	organizations := r.Group("/organizations")
-	{
-		organizations.GET("/:id", h.GetOrganization)
-		organizations.PUT("/:id", h.UpdateOrganization)
-		organizations.DELETE("/:id", h.DeleteOrganization)
 	}
 }
 
@@ -59,91 +49,88 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 func (h *Handler) CreateAccount(c *gin.Context) {
 	var req model.CreateAccountRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		log.Printf("Failed to bind JSON: %v", err)
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse(err.Error()))
 		return
 	}
 
-	user, err := h.service.CreateAccount(c.Request.Context(), &req)
+	account, err := h.service.CreateAccount(c.Request.Context(), &req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		log.Printf("Failed to create account: %v", err)
+		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
 		return
 	}
 
-	c.JSON(http.StatusCreated, user)
+	c.JSON(http.StatusCreated, handler.NewSuccessResponse(account))
 }
 
 func (h *Handler) GetAccount(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id format"})
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid account ID"))
 		return
 	}
 
-	user, err := h.service.GetAccount(c.Request.Context(), id)
+	account, err := h.service.GetAccount(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
 		return
 	}
 
-	c.JSON(http.StatusOK, user)
+	c.JSON(http.StatusOK, handler.NewSuccessResponse(account))
 }
 
 func (h *Handler) UpdateAccount(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id format"})
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid account ID"))
 		return
 	}
 
-	var user model.Account
-	if err := c.ShouldBindJSON(&user); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	var account model.Account
+	if err := c.ShouldBindJSON(&account); err != nil {
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse(err.Error()))
+		return
+	}
+	account.ID = id
+
+	if err := h.service.UpdateAccount(c.Request.Context(), &account); err != nil {
+		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
 		return
 	}
 
-	user.ID = id
-	if err := h.service.UpdateAccount(c.Request.Context(), &user); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, user)
+	c.JSON(http.StatusOK, handler.NewSuccessResponse(nil))
 }
 
 func (h *Handler) DeleteAccount(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id format"})
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid account ID"))
 		return
 	}
 
 	if err := h.service.DeleteAccount(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	c.JSON(http.StatusOK, handler.NewSuccessResponse(nil))
 }
 
 func (h *Handler) ListAccounts(c *gin.Context) {
 	var filters model.AccountFilters
-
-	// Parse organization ID if provided
-	if orgID := c.Query("organization_id"); orgID != "" {
-		filters.Search = orgID // or handle differently based on AccountFilters structure
-	}
-
-	filters.Status = c.Query("status")
-	filters.Plan = c.Query("plan")
-	filters.Search = c.Query("search")
-
-	users, err := h.service.ListAccounts(c.Request.Context(), &filters)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := c.ShouldBindQuery(&filters); err != nil {
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse(err.Error()))
 		return
 	}
 
-	c.JSON(http.StatusOK, users)
+	accounts, err := h.service.ListAccounts(c.Request.Context(), &filters)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, handler.NewSuccessResponse(accounts))
 }
 
 type createOrganizationRequest struct {

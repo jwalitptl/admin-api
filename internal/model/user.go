@@ -29,13 +29,14 @@ type User struct {
 	OrganizationID       uuid.UUID  `json:"organization_id" db:"organization_id"`
 	Email                string     `json:"email" db:"email"`
 	Name                 string     `json:"name" db:"name"`
-	Password             string     `json:"password" db:"password"`
+	Password             string     `json:"password,omitempty" db:"-"`
 	PasswordHash         string     `json:"-" db:"password_hash"`
-	FirstName            string     `json:"first_name" db:"first_name"`
-	LastName             string     `json:"last_name" db:"last_name"`
-	Phone                string     `json:"phone" db:"phone"`
+	FirstName            *string    `json:"first_name" db:"first_name"`
+	LastName             *string    `json:"last_name" db:"last_name"`
+	Phone                *string    `json:"phone" db:"phone"`
 	Type                 string     `json:"type" db:"type"`
 	Status               string     `json:"status" db:"status"`
+	RegionCode           *string    `json:"region_code" db:"region_code"`
 	EmailVerified        bool       `json:"email_verified" db:"email_verified"`
 	PhoneVerified        bool       `json:"phone_verified" db:"phone_verified"`
 	LastLoginAt          *time.Time `json:"last_login_at" db:"last_login_at"`

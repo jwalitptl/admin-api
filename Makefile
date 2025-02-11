@@ -1,193 +1,125 @@
-.PHONY: test-api ensure-api test-cleanup test-user-api test-events test-patient test-clinic
+.PHONY: test test-worker test-auth test-patient test-clinic test-coverage dev
 
-# Start services and test account creation API
-test-api: ensure-api
-	@echo "🚀 Testing Account Creation API..."
-	@echo "\n1. Rebuilding and starting services..."
-	@docker compose build --no-cache admin-api
-	@docker compose up -d postgres redis admin-api
-	@echo "⏳ Waiting for services to be ready..."
-	@echo "Waiting for API to be healthy..."
-	@for i in {1..30}; do \
-	  if curl -s http://localhost:8080/health/live > /dev/null; then \
-		echo "API is ready!"; \
-		break; \
-	  fi; \
-	  echo "Waiting... $$i/30"; \
-	  if [ $$i -eq 15 ]; then \
-		echo "\n🔍 Checking API logs:"; \
-		docker compose logs admin-api; \
-	  fi; \
-	  sleep 1; \
-	done
+# Test configuration
+TEST_FLAGS := -v -race
+COVERAGE_FILE := coverage.out
+COVERAGE_HTML := coverage.html
 
-	@echo "\n2. Running migrations..."
-	@docker compose exec admin-api migrate -path=/app/migrations -database "postgres://postgres:postgres@postgres:5432/aiclinic?sslmode=disable" up
+# Application settings
+APP_NAME := admin-api
+DB_NAME := admin_db
 
-	@echo "\n3. Testing Account Creation endpoint..."
-	@echo "Creating account..."
-	@ACCOUNT_RESPONSE=$$(curl -s -X POST http://localhost:8080/api/v1/accounts \
-		-H "Content-Type: application/json" \
-		-d '{ \
-			"name": "Test Hospital", \
-			"email": "admin@hospital.com", \
-			"password": "password123", \
-			"status": "active" \
-		}') \
-	&& echo "Account creation response: $$ACCOUNT_RESPONSE" \
-	&& echo $$ACCOUNT_RESPONSE | jq -r '.data.id' > account_id.txt
+# Docker settings
+DOCKER_COMPOSE := docker-compose
+DOCKER_COMPOSE_FILE := docker-compose.yml
+PORT := 8081
+DB_USER := postgres
+DB_PASS := postgres
 
-	@echo "\nVerifying account in database..."
-	@docker compose exec postgres psql -U postgres -d aiclinic -c "SELECT id, email, status FROM accounts;"
+# Main test targets
+test: ## Run all tests
+	go test $(TEST_FLAGS) ./...
 
-	@echo "\n4. Creating Organization..."
-	@ACCOUNT_ID=$$(cat account_id.txt) && \
-	ORG_RESPONSE=$$(curl -s -X POST http://localhost:8080/api/v1/accounts/$$ACCOUNT_ID/organizations \
-		-H "Content-Type: application/json" \
-		-d '{ \
-			"name": "Test Organization", \
-			"status": "active" \
-		}') \
-	&& echo "Organization creation response: $$ORG_RESPONSE" \
-	&& echo $$ORG_RESPONSE | jq -r '.data.id' > org_id.txt
+test-coverage: ## Run tests with coverage
+	go test $(TEST_FLAGS) -coverprofile=$(COVERAGE_FILE) ./...
+	go tool cover -html=$(COVERAGE_FILE) -o $(COVERAGE_HTML)
 
-	@echo "\nVerifying organization in database..."
-	@docker compose exec postgres psql -U postgres -d aiclinic -c "SELECT id, name, status FROM organizations;"
+# Individual test groups
+test-worker: ## Run worker-related tests
+	go test $(TEST_FLAGS) ./cmd/worker/... ./pkg/worker/...
 
-	@echo "\nCreated organization with ID: $$(cat org_id.txt)"
+test-auth: ## Run authentication-related tests
+	go test $(TEST_FLAGS) ./internal/service/auth/... ./internal/handler/auth/...
 
-# Ensure clean environment and dependencies
-ensure-api:
+test-patient: ## Run patient-related tests
+	go test $(TEST_FLAGS) ./internal/service/patient/... ./internal/handler/patient/...
+
+test-clinic: ## Run clinic-related tests
+	go test $(TEST_FLAGS) ./internal/service/clinic/... ./internal/handler/clinic/...
+
+# Development helpers
+mock-gen: ## Generate mocks for testing
+	mockgen -source=internal/repository/interfaces.go -destination=internal/mocks/repository_mocks.go -package=mocks
+	mockgen -source=pkg/messaging/broker.go -destination=internal/mocks/broker_mocks.go -package=mocks
+	mockgen -source=internal/service/auth/service.go -destination=internal/mocks/auth_service_mock.go -package=mocks
+
+test-clean: ## Clean test cache
+	go clean -testcache
+
+# New commands
+all: dev
+
+dev: ## Run everything in development mode
+	@echo "🚀 Starting development environment..."
+	
 	@echo "🧹 Cleaning up previous instances..."
-	@docker compose down -v
-	@echo "📦 Checking dependencies..."
-	@which migrate || go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
-	@echo "🔄 Starting required services..."
-	@docker compose up -d postgres redis
-	@echo "⏳ Waiting for databases to be ready..."
-	@sleep 5
+	@$(DOCKER_COMPOSE) down -v 2>/dev/null || true
+	@pkill -f "$(APP_NAME)" 2>/dev/null || true
+	@lsof -ti:$(PORT) | xargs kill -9 2>/dev/null || true
+	
+	@echo "🐳 Starting Docker services..."
+	@$(DOCKER_COMPOSE) up -d postgres redis
+	
+	@echo "⏳ Waiting for database..."
+	@until docker exec admin-api-postgres-1 pg_isready -U $(DB_USER) > /dev/null 2>&1; do \
+		sleep 1; \
+	done
+	
+	@echo "🔄 Running migrations..."
+	@docker exec -i admin-api-postgres-1 psql -U $(DB_USER) -c "DROP DATABASE IF EXISTS $(DB_NAME);" 2>/dev/null || true
+	@docker exec -i admin-api-postgres-1 psql -U $(DB_USER) -c "CREATE DATABASE $(DB_NAME);"
+	@for f in migrations/*.up.sql; do \
+		echo "Applying $$f..."; \
+		docker exec -i admin-api-postgres-1 psql -U $(DB_USER) -d $(DB_NAME) < $$f; \
+	done
+	
+	@echo "🚀 Starting API server..."
+	@go run cmd/api/main.go > api.log 2>&1 & echo $$! > api.pid
+	@echo "🚀 Starting worker..."
+	@go run cmd/worker/main.go > worker.log 2>&1 & echo $$! > worker.pid
+	
+	@echo "⏳ Waiting for API server..."
+	@for i in {1..30}; do \
+		if curl -s http://localhost:$(PORT)/health > /dev/null; then \
+			echo "✅ API server is ready!"; \
+			break; \
+		fi; \
+		if [ $$i -eq 30 ]; then \
+			echo "❌ API server failed to start"; \
+			cat api.log; \
+			exit 1; \
+		fi; \
+		sleep 1; \
+	done
+	
+	@echo "🧪 Running API tests..."
+	@chmod +x scripts/test_api.sh
+	@./scripts/test_api.sh
+	
+	@echo "✨ Development environment is ready!"
+	@echo "📝 Logs available in api.log and worker.log"
+	@echo "💡 Use 'make stop' to stop all services"
 
-# Cleanup after testing
-test-cleanup:
-	@echo "🧹 Cleaning up test environment..."
-	@rm -f account_id.txt org_id.txt token.txt
-	@docker compose down -v 
+stop: ## Stop all services
+	@if [ -f $(DOCKER_COMPOSE_FILE) ]; then \
+		$(DOCKER_COMPOSE) down || true; \
+	fi
+	@pkill -f "$(APP_NAME)" || true
 
-test-user-api:
-	@echo "🚀 Testing User Creation API..."
-	@echo "\n1. Getting auth token..."
-	@TOKEN=$$(curl -s -X POST http://localhost:8080/api/v1/auth/login \
-		-H "Content-Type: application/json" \
-		-d '{"email":"admin@hospital.com","password":"password123"}' | jq -r '.data.access_token') \
-	&& if [ "$$TOKEN" = "null" ]; then \
-		echo "Failed to get token"; \
-		exit 1; \
-	fi \
-	&& echo "Got token: $$TOKEN" \
-	&& curl -v -X POST http://localhost:8080/api/v1/users \
-		-H "Content-Type: application/json" \
-		-H "Authorization: Bearer $$TOKEN" \
-		-d "{ \
-			\"organization_id\": \"$$(cat org_id.txt)\", \
-			\"name\": \"Test User\", \
-			\"email\": \"test@example.com\", \
-			\"password\": \"password123\", \
-			\"type\": \"admin\" \
-		}"
+clean: stop ## Clean up everything
+	@lsof -ti:8080 | xargs kill -9 2>/dev/null || true
+	@lsof -ti:8081 | xargs kill -9 2>/dev/null || true
+	@rm -f $(COVERAGE_FILE) $(COVERAGE_HTML) api.log worker.log || true
+	@if [ -n "$$(docker volume ls -q)" ]; then \
+		$(DOCKER_COMPOSE) down -v || true
+		docker volume rm $$(docker volume ls -q) 2>/dev/null || true; \
+	fi
 
-test-events: ensure-api
-	@echo "🚀 Testing Event System..."
-	@echo "\n1. Waiting for account setup..."
-	@sleep 5  # Add delay to ensure account is ready
-	@echo "\n2. Getting auth token..."
-	@echo "Attempting login with admin@hospital.com..."
-	@TOKEN=$$(curl -s -X POST http://localhost:8080/api/v1/auth/login \
-		-H "Content-Type: application/json" \
-		-d '{"email":"admin@hospital.com","password":"password123"}') \
-	&& echo "Login response: $$TOKEN" \
-	&& TOKEN_VALUE=$$(echo "$$TOKEN" | jq -r '.data.access_token') \
-	&& if [ "$$TOKEN_VALUE" = "null" ]; then \
-		echo "Failed to get token. Full response: $$TOKEN"; \
-		exit 1; \
-	fi \
-	&& echo "Got token: $$TOKEN_VALUE" \
-	&& echo "\n3. Creating user..." \
-	&& ORG_ID=$$(cat org_id.txt) \
-	&& echo "Using org ID: $$ORG_ID" \
-	&& curl -s -X POST http://localhost:8080/api/v1/users \
-		-H "Content-Type: application/json" \
-		-H "Authorization: Bearer $$TOKEN_VALUE" \
-		-d "{ \
-			\"organization_id\": \"$$ORG_ID\", \
-			\"name\": \"Test User\", \
-			\"email\": \"test@example.com\", \
-			\"password\": \"password123\", \
-			\"type\": \"admin\" \
-		}"
+api-test: ## Run API tests
+	@echo "Running API tests..."
+	@chmod +x scripts/test_api.sh
+	@./scripts/test_api.sh
 
-	@echo "\n4. Checking outbox events in database..."
-	@docker compose exec postgres psql -U postgres -d aiclinic -c "SELECT event_type, status, error FROM outbox_events WHERE event_type IN ('CLINIC_CREATE', 'CLINIC_UPDATE', 'CLINIC_DELETE', 'PATIENT_CREATE', 'PATIENT_UPDATE', 'PATIENT_DELETE') ORDER BY created_at DESC LIMIT 5;"
-
-	@echo "\n5. Checking events in Redis..."
-	@echo "All Redis keys:"
-	@docker compose exec redis redis-cli KEYS "*"
-	@echo "\nEvent details (events list):"
-	@docker compose exec redis redis-cli --raw LRANGE events 0 -1 || echo "No events found"
-	@echo "\nEvent details (event.* keys):"
-	@docker compose exec redis redis-cli --raw KEYS "event.*" || echo "No event.* keys found"
-	@echo "\nEvent details (outbox.* keys):"
-	@docker compose exec redis redis-cli --raw KEYS "outbox.*" || echo "No outbox.* keys found"
-
-	@echo "\nTest complete! 🎉"
-
-# Regular test without logs
-test-all: ensure-api test-api test-events test-clinic test-patient
-	@make test-cleanup
-
-# Test with logs
-test-all-debug: ensure-api test-api test-events test-clinic test-patient
-	@echo "\n🔍 Checking container logs..."
-	@docker compose logs
-	@echo "\nDone checking logs"
-	@make test-cleanup
-
-# Fix the token issue in test-patient and test-clinic
-test-patient:
-	@echo "\n6. Creating patient..."
-	@TOKEN=$$(curl -s -X POST http://localhost:8080/api/v1/auth/login \
-		-H "Content-Type: application/json" \
-		-d '{"email":"admin@hospital.com","password":"password123"}' | jq -r '.data.access_token') \
-	&& echo "Using clinic ID: $$(cat clinic_id.txt)" \
-	&& REQUEST='{ \
-			"organization_id": "'$$(cat org_id.txt)'", \
-			"clinic_id": "'$$(cat clinic_id.txt)'", \
-			"name": "Test Patient", \
-			"email": "patient@example.com", \
-			"phone": "+1234567890", \
-			"dob": "1990-01-01T00:00:00.000Z", \
-			"address": "123 Patient St", \
-			"status": "active" \
-		}' \
-	&& echo "Request: $$REQUEST" \
-	&& curl -v -X POST http://localhost:8080/api/v1/patients \
-		-H "Content-Type: application/json" \
-		-H "Authorization: Bearer $$TOKEN" \
-		-d "$$REQUEST"
-
-test-clinic:
-	@echo "\n7. Creating clinic..."
-	@TOKEN=$$(curl -s -X POST http://localhost:8080/api/v1/auth/login \
-		-H "Content-Type: application/json" \
-		-d '{"email":"admin@hospital.com","password":"password123"}' | jq -r '.data.access_token') \
-	&& RESPONSE=$$(curl -s -X POST http://localhost:8080/api/v1/clinics \
-		-H "Content-Type: application/json" \
-		-H "Authorization: Bearer $$TOKEN" \
-		-d "{ \
-			\"organization_id\": \"$$(cat org_id.txt)\", \
-			\"name\": \"Test Clinic\", \
-			\"address\": \"123 Test St\", \
-			\"location\": \"Building A\", \
-			\"status\": \"active\" \
-		}") \
-	&& echo $$RESPONSE \
-	&& echo $$RESPONSE | jq -r '.data.id' > clinic_id.txt 
+run-all: clean start api-test ## Run everything from scratch
+	@echo "All tests completed"
+	@make stop 

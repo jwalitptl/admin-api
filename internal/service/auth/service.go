@@ -50,13 +50,21 @@ func NewService(userRepo repository.UserRepository, jwtSvc auth.JWTService,
 	}
 }
 
+func stringPtr(s string) *string {
+	return &s
+}
+
 func (s *Service) Login(ctx context.Context, email, password string) (*model.TokenResponse, error) {
+	log.Printf("Login attempt for email: %s", email)
 	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
+		log.Printf("User not found: %v", err)
 		return nil, fmt.Errorf("invalid credentials")
 	}
 
-	if user.Status == model.UserStatusLocked {
+	log.Printf("Found user: %+v", user)
+
+	if user.Status == model.UserStatusLocked || user.Status == model.UserStatusInactive {
 		if time.Since(user.LastLoginAttempt) < lockoutDuration {
 			return nil, fmt.Errorf("account is locked, please try again later")
 		}
@@ -64,7 +72,9 @@ func (s *Service) Login(ctx context.Context, email, password string) (*model.Tok
 		user.LoginAttempts = 0
 	}
 
+	log.Printf("Comparing password hash: stored=%s", user.PasswordHash)
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+		log.Printf("Password comparison failed: %v", err)
 		user.LoginAttempts++
 		user.LastLoginAttempt = time.Now()
 
@@ -165,24 +175,33 @@ func (s *Service) Register(ctx context.Context, req *model.RegisterRequest) (*mo
 		return nil, fmt.Errorf("email already registered")
 	}
 
+	log.Printf("Registering new user with email: %s", req.Email)
 	// Hash password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcryptCost)
 	if err != nil {
 		return nil, fmt.Errorf("failed to hash password: %w", err)
 	}
+	log.Printf("Generated password hash: %s", string(hashedPassword))
 
 	user := &model.User{
 		Base: model.Base{
 			ID: uuid.New(),
 		},
-		PasswordHash: string(hashedPassword),
-		Name:         fmt.Sprintf("%s %s", req.FirstName, req.LastName),
-		Email:        req.Email,
-		Phone:        req.Phone,
-		Status:       "pending",
+		PasswordHash:   string(hashedPassword),
+		Name:           fmt.Sprintf("%s %s", req.FirstName, req.LastName),
+		Email:          req.Email,
+		Phone:          &req.Phone,
+		FirstName:      &req.FirstName,
+		LastName:       &req.LastName,
+		Type:           req.Type,
+		OrganizationID: req.OrganizationID,
+		Status:         "active",
+		RegionCode:     stringPtr("US"),
 	}
 
+	log.Printf("Creating user: %+v", user)
 	if err := s.userRepo.Create(ctx, user); err != nil {
+		log.Printf("Failed to create user: %v", err)
 		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
 
@@ -308,14 +327,21 @@ func (s *Service) verifyEmailToken(ctx context.Context, token string) error {
 }
 
 func (s *Service) generateTokens(user *model.User) (*model.TokenResponse, error) {
+	log.Printf("Generating tokens for user: %+v", user)
 	accessToken, err := s.jwtSvc.GenerateAccessToken(user)
 	if err != nil {
+		log.Printf("Failed to generate access token: %v", err)
 		return nil, err
 	}
 
 	refreshToken, err := s.jwtSvc.GenerateRefreshToken(user)
 	if err != nil {
+		log.Printf("Failed to generate refresh token: %v", err)
 		return nil, err
+	}
+
+	if accessToken == "" || refreshToken == "" {
+		return nil, fmt.Errorf("generated tokens are empty")
 	}
 
 	return &model.TokenResponse{

@@ -22,6 +22,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	{
 		health.GET("/live", h.LivenessCheck)
 		health.GET("/ready", h.ReadinessCheck)
+		health.GET("/health", Health)
 	}
 }
 
@@ -38,4 +39,8 @@ func (h *Handler) ReadinessCheck(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "UP"})
+}
+
+func Health(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }

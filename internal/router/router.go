@@ -2,6 +2,7 @@ package router
 
 import (
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +14,7 @@ import (
 	"github.com/jwalitptl/admin-api/internal/handler/appointment"
 	authHandler "github.com/jwalitptl/admin-api/internal/handler/auth"
 	"github.com/jwalitptl/admin-api/internal/handler/clinic"
+	"github.com/jwalitptl/admin-api/internal/handler/organization"
 	"github.com/jwalitptl/admin-api/internal/handler/patient"
 	permissionHandler "github.com/jwalitptl/admin-api/internal/handler/permission"
 	rbacHandler "github.com/jwalitptl/admin-api/internal/handler/rbac"
@@ -40,6 +42,7 @@ type Router struct {
 	appointmentH      EventHandler
 	patientHandler    EventHandler
 	permissionHandler EventHandler
+	organizationH     EventHandler
 	h                 *handler.Handler
 	eventTracker      *pkg_event.EventTrackerMiddleware
 	userHandler       EventHandler
@@ -61,20 +64,21 @@ type RouterConfig struct {
 }
 
 type Config struct {
-	AuthMiddleware     *middleware.AuthMiddleware
-	HIPAAMiddleware    *middleware.HIPAAMiddleware
-	RegionMiddleware   *middleware.RegionMiddleware
-	RegionValidation   *middleware.RegionValidationMiddleware
-	AccountHandler     *account.Handler
-	AuthHandler        *authHandler.Handler
-	ClinicHandler      *clinic.Handler
-	UserHandler        *user.Handler
-	RBACHandler        *rbacHandler.Handler
-	AppointmentHandler *appointment.Handler
-	PermissionHandler  *permissionHandler.Handler
-	PatientHandler     *patient.Handler
-	BaseHandler        *handler.Handler
-	EventTracker       *pkg_event.EventTrackerMiddleware
+	AuthMiddleware      *middleware.AuthMiddleware
+	HIPAAMiddleware     *middleware.HIPAAMiddleware
+	RegionMiddleware    *middleware.RegionMiddleware
+	RegionValidation    *middleware.RegionValidationMiddleware
+	AccountHandler      *account.Handler
+	OrganizationHandler *organization.Handler
+	AuthHandler         *authHandler.Handler
+	ClinicHandler       *clinic.Handler
+	UserHandler         *user.Handler
+	RBACHandler         *rbacHandler.Handler
+	AppointmentHandler  *appointment.Handler
+	PermissionHandler   *permissionHandler.Handler
+	PatientHandler      *patient.Handler
+	BaseHandler         *handler.Handler
+	EventTracker        *pkg_event.EventTrackerMiddleware
 }
 
 func NewRouter(config Config) *Router {
@@ -91,6 +95,7 @@ func NewRouter(config Config) *Router {
 		appointmentH:      config.AppointmentHandler,
 		patientHandler:    config.PatientHandler,
 		permissionHandler: config.PermissionHandler,
+		organizationH:     config.OrganizationHandler,
 		h:                 config.BaseHandler,
 		eventTracker:      config.EventTracker,
 		userHandler:       config.UserHandler,
@@ -114,8 +119,10 @@ func (r *Router) Setup() {
 	api.Use(r.regionValidation.ValidateRegion())
 	api.Use(r.regionValidation.ValidateRequirements())
 
-	// Public routes
+	// Public routes (no auth required)
 	r.setupPublicRoutes(api)
+	r.accountH.RegisterRoutesWithEvents(api, r.eventTracker)      // Account routes
+	r.organizationH.RegisterRoutesWithEvents(api, r.eventTracker) // Organization routes
 
 	// Protected routes
 	protected := api.Group("")
@@ -137,7 +144,6 @@ func (r *Router) setupHealthCheck(rg *gin.RouterGroup) {
 
 func (r *Router) setupPublicRoutes(rg *gin.RouterGroup) {
 	r.authH.RegisterRoutes(rg)
-	r.accountH.RegisterRoutesWithEvents(rg, r.eventTracker)
 }
 
 func (r *Router) setupProtectedRoutes(rg *gin.RouterGroup) {
@@ -184,6 +190,10 @@ func (r *Router) setupHIPAARoutes(rg *gin.RouterGroup) {
 
 func (r *Router) Engine() *gin.Engine {
 	return r.engine
+}
+
+func (r *Router) Group(path string) *gin.RouterGroup {
+	return r.engine.Group(path)
 }
 
 // Additional interfaces for feature-specific handlers
@@ -249,4 +259,8 @@ func (r *Router) Use(middleware ...gin.HandlerFunc) {
 
 func (r *Router) GET(path string, handlers ...gin.HandlerFunc) {
 	r.engine.GET(path, handlers...)
+}
+
+func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	r.engine.ServeHTTP(w, req)
 }

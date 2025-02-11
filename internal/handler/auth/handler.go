@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -36,12 +37,16 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 func (h *Handler) Register(c *gin.Context) {
 	var req model.RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("Register request bind error: %v", err)
 		c.JSON(http.StatusBadRequest, handler.NewErrorResponse(err.Error()))
 		return
 	}
 
+	log.Printf("Register request: %+v", req)
+
 	user, err := h.svc.Register(c.Request.Context(), &req)
 	if err != nil {
+		log.Printf("Register error: %v", err)
 		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
 		return
 	}

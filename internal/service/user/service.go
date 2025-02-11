@@ -198,11 +198,11 @@ func (s *Service) validateUser(user *model.User) error {
 		return fmt.Errorf("organization ID is required")
 	}
 
-	if user.FirstName == "" {
+	if user.FirstName == nil || *user.FirstName == "" {
 		return fmt.Errorf("first name is required")
 	}
 
-	if user.LastName == "" {
+	if user.LastName == nil || *user.LastName == "" {
 		return fmt.Errorf("last name is required")
 	}
 

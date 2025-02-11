@@ -1,2 +1,0 @@
-DROP TABLE IF EXISTS appointments;
-DROP TABLE IF EXISTS patients; 
