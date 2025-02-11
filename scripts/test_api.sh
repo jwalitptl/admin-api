@@ -367,6 +367,10 @@ assert $? "Clinic filtering"
 
 # Test clinic staff assignment
 echo "Testing clinic staff assignment..."
+# First remove any existing assignment
+curl -s -X DELETE "${BASE_URL}/clinics/${CLINIC_ID}/staff/${USER_ID}" \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+
 STAFF_ASSIGN_RESPONSE=$(curl -s -X POST "${BASE_URL}/clinics/${CLINIC_ID}/staff" \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
@@ -374,6 +378,7 @@ STAFF_ASSIGN_RESPONSE=$(curl -s -X POST "${BASE_URL}/clinics/${CLINIC_ID}/staff"
     "user_id": "'$USER_ID'",
     "role": "doctor"
   }')
+echo "Debug - Staff Assignment Response: $STAFF_ASSIGN_RESPONSE"
 echo "$STAFF_ASSIGN_RESPONSE" | jq -e '.status == "success"' > /dev/null
 assert $? "Clinic staff assignment"
 

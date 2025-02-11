@@ -1,0 +1,2 @@
+ALTER TABLE clinic_staff
+ADD COLUMN updated_at TIMESTAMP DEFAULT NOW(); 

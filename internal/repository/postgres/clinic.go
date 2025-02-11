@@ -150,9 +150,18 @@ func (r *clinicRepository) List(ctx context.Context, organizationID uuid.UUID) (
 }
 
 func (r *clinicRepository) AssignStaff(ctx context.Context, staff *model.ClinicStaff) error {
-	query := `INSERT INTO clinic_staff (clinic_id, user_id, role, created_at) VALUES ($1, $2, $3, $4)`
+	query := `
+		INSERT INTO clinic_staff (clinic_id, user_id, role, created_at) 
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (clinic_id, user_id) 
+		DO UPDATE SET 
+			role = EXCLUDED.role
+	`
 	_, err := r.db.ExecContext(ctx, query, staff.ClinicID, staff.UserID, staff.Role, staff.CreatedAt)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to assign staff: %w", err)
+	}
+	return nil
 }
 
 func (r *clinicRepository) ListStaff(ctx context.Context, clinicID uuid.UUID) ([]*model.ClinicStaff, error) {
