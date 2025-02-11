@@ -260,7 +260,7 @@ echo "Creating test clinic..."
 echo "Debug - Clinic Request: {
   \"name\": \"Test Clinic\",
   \"organization_id\": \"$ORG_ID\",
-  \"address\": \"123 Test St\",
+  \"location\": \"123 Test St\",
   \"status\": \"active\"
 }"
 CLINIC_RESPONSE=$(curl -s -X POST "${BASE_URL}/clinics" \
@@ -269,7 +269,7 @@ CLINIC_RESPONSE=$(curl -s -X POST "${BASE_URL}/clinics" \
   -d '{
     "name": "Test Clinic",
     "organization_id": "'$ORG_ID'",
-    "address": "123 Test St",
+    "location": "123 Test St",
     "status": "active"
   }')
 echo "Debug - Clinic Response: $CLINIC_RESPONSE"
