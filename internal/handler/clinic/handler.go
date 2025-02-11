@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -48,6 +49,14 @@ func (h *Handler) RegisterRoutesWithEvents(r *gin.RouterGroup, eventTracker *eve
 		clinics.DELETE("/:id/staff/:userId", eventTracker.TrackEvent("clinic", "staff_remove"), h.RemoveStaff)
 		clinics.GET("", h.ListClinics)
 		clinics.GET("/:id", h.GetClinic)
+
+		// Service routes
+		clinics.POST("/:id/services", eventTracker.TrackEvent("service", "create"), h.CreateService)
+		clinics.GET("/:id/services", h.ListServices)
+		clinics.GET("/:id/services/:serviceId", h.GetService)
+		clinics.PUT("/:id/services/:serviceId", eventTracker.TrackEvent("service", "update"), h.UpdateService)
+		clinics.DELETE("/:id/services/:serviceId", eventTracker.TrackEvent("service", "delete"), h.DeleteService)
+		clinics.PATCH("/:id/services/:serviceId/deactivate", eventTracker.TrackEvent("service", "deactivate"), h.DeactivateService)
 	}
 }
 
@@ -295,6 +304,165 @@ func (h *Handler) RemoveStaff(c *gin.Context) {
 	}
 
 	if err := h.service.RemoveStaff(c.Request.Context(), clinicID, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, handler.NewSuccessResponse(nil))
+}
+
+// Service handler methods
+func (h *Handler) CreateService(c *gin.Context) {
+	clinicID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid clinic ID"))
+		return
+	}
+
+	var service model.Service
+	if err := c.ShouldBindJSON(&service); err != nil {
+		log.Printf("Debug - Validation error: %v", err)
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse(err.Error()))
+		return
+	}
+
+	// Validate required fields
+	if service.Name == "" {
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("service name is required"))
+		return
+	}
+	if service.Duration <= 0 {
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("duration must be positive"))
+		return
+	}
+	if service.Price < 0 {
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("price cannot be negative"))
+		return
+	}
+
+	service.ClinicID = clinicID
+	if err := h.service.CreateService(c.Request.Context(), &service); err != nil {
+		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusCreated, handler.NewSuccessResponse(service))
+}
+
+func (h *Handler) ListServices(c *gin.Context) {
+	clinicID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid clinic ID"))
+		return
+	}
+
+	search := c.Query("search")
+	isActive := c.Query("is_active")
+
+	services, err := h.service.ListServices(c.Request.Context(), clinicID, search, isActive)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, handler.NewSuccessResponse(services))
+}
+
+func (h *Handler) GetService(c *gin.Context) {
+	clinicID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid clinic ID"))
+		return
+	}
+
+	serviceID, err := uuid.Parse(c.Param("serviceId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid service ID"))
+		return
+	}
+
+	service, err := h.service.GetService(c.Request.Context(), clinicID, serviceID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, handler.NewSuccessResponse(service))
+}
+
+func (h *Handler) UpdateService(c *gin.Context) {
+	clinicID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid clinic ID"))
+		return
+	}
+
+	serviceID, err := uuid.Parse(c.Param("serviceId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid service ID"))
+		return
+	}
+
+	var service model.Service
+	if err := c.ShouldBindJSON(&service); err != nil {
+		log.Printf("Debug - Service update bind error: %v", err)
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse(err.Error()))
+		return
+	}
+
+	service.ClinicID = clinicID
+	service.ID = serviceID
+	service.UpdatedAt = time.Now()
+	// Set default status if not provided
+	if service.Status == "" {
+		service.Status = "active"
+	}
+
+	log.Printf("Debug - Updating service: %+v", service)
+	if err := h.service.UpdateService(c.Request.Context(), &service); err != nil {
+		log.Printf("Debug - Service update error: %v", err)
+		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, handler.NewSuccessResponse(service))
+}
+
+func (h *Handler) DeleteService(c *gin.Context) {
+	clinicID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid clinic ID"))
+		return
+	}
+
+	serviceID, err := uuid.Parse(c.Param("serviceId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid service ID"))
+		return
+	}
+
+	if err := h.service.DeleteService(c.Request.Context(), clinicID, serviceID); err != nil {
+		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, handler.NewSuccessResponse(nil))
+}
+
+func (h *Handler) DeactivateService(c *gin.Context) {
+	clinicID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid clinic ID"))
+		return
+	}
+
+	serviceID, err := uuid.Parse(c.Param("serviceId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid service ID"))
+		return
+	}
+
+	if err := h.service.DeactivateService(c.Request.Context(), clinicID, serviceID); err != nil {
 		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
 		return
 	}

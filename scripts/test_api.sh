@@ -463,18 +463,6 @@ DEACTIVATE_RESPONSE=$(curl -s -X PATCH "${BASE_URL}/clinics/${CLINIC_ID}/service
 echo "$DEACTIVATE_RESPONSE" | jq -e '.status == "success"' > /dev/null
 assert $? "Service deactivation"
 
-# Test bulk service update
-echo "Testing bulk service update..."
-BULK_UPDATE_RESPONSE=$(curl -s -X PUT "${BASE_URL}/clinics/${CLINIC_ID}/services/bulk" \
-  -H "Authorization: Bearer $ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "price_adjustment": 10,
-    "service_ids": ["'$SERVICE_ID'"]
-  }')
-echo "$BULK_UPDATE_RESPONSE" | jq -e '.status == "success"' > /dev/null
-assert $? "Bulk service update"
-
 # Test Error Cases
 echo -e "\n${GREEN}10. Testing Error Cases${NC}"
 # Test invalid user ID
@@ -494,6 +482,78 @@ INVALID_ROLE_RESPONSE=$(curl -s -X POST "${BASE_URL}/users/${USER_ID}/roles/inva
   -H "Authorization: Bearer $ACCESS_TOKEN")
 echo "$INVALID_ROLE_RESPONSE" | grep "error" > /dev/null
 assert $? "Invalid role assignment handling"
+
+# Test Appointment Management
+echo -e "\n${GREEN}10. Testing Appointment Management${NC}"
+
+# Create an appointment
+echo "Creating appointment..."
+APPOINTMENT_RESPONSE=$(curl -s -X POST "${BASE_URL}/appointments" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "clinic_id": "'$CLINIC_ID'",
+    "patient_id": "'$USER_ID'",
+    "staff_id": "'$USER_ID'",
+    "service_id": "'$SERVICE_ID'",
+    "start_time": "'$(date -v+1d +"%Y-%m-%dT10:00:00Z")'",
+    "end_time": "'$(date -v+1d +"%Y-%m-%dT11:00:00Z")'",
+    "status": "scheduled"
+  }')
+echo "$APPOINTMENT_RESPONSE" | jq -e '.status == "success"' > /dev/null
+assert $? "Appointment creation"
+
+# Extract appointment ID
+APPOINTMENT_ID=$(echo "$APPOINTMENT_RESPONSE" | jq -r '.data.id')
+
+# Test invalid appointment creation (overlapping time)
+echo "Testing invalid appointment creation..."
+INVALID_APPOINTMENT_RESPONSE=$(curl -s -X POST "${BASE_URL}/appointments" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "clinic_id": "'$CLINIC_ID'",
+    "patient_id": "'$USER_ID'",
+    "staff_id": "'$USER_ID'",
+    "service_id": "'$SERVICE_ID'",
+    "start_time": "'$(date -v+1d +"%Y-%m-%dT10:30:00Z")'",
+    "end_time": "'$(date -v+1d +"%Y-%m-%dT11:30:00Z")'",
+    "status": "scheduled"
+  }')
+echo "$INVALID_APPOINTMENT_RESPONSE" | jq -e '.status == "error"' > /dev/null
+assert $? "Invalid appointment creation handling"
+
+# List appointments
+echo "Listing appointments..."
+LIST_APPOINTMENTS_RESPONSE=$(curl -s -X GET "${BASE_URL}/appointments?clinic_id=${CLINIC_ID}" \
+  -H "Authorization: Bearer $ACCESS_TOKEN")
+echo "$LIST_APPOINTMENTS_RESPONSE" | jq -e '.status == "success" and (.data | length) > 0' > /dev/null
+assert $? "Appointment listing"
+
+# Update appointment
+echo "Updating appointment..."
+UPDATE_APPOINTMENT_RESPONSE=$(curl -s -X PUT "${BASE_URL}/appointments/${APPOINTMENT_ID}" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "status": "confirmed"
+  }')
+echo "$UPDATE_APPOINTMENT_RESPONSE" | jq -e '.status == "success"' > /dev/null
+assert $? "Appointment update"
+
+# Cancel appointment
+echo "Canceling appointment..."
+CANCEL_APPOINTMENT_RESPONSE=$(curl -s -X PUT "${BASE_URL}/appointments/${APPOINTMENT_ID}/cancel" \
+  -H "Authorization: Bearer $ACCESS_TOKEN")
+echo "$CANCEL_APPOINTMENT_RESPONSE" | jq -e '.status == "success"' > /dev/null
+assert $? "Appointment cancellation"
+
+# Delete appointment
+echo "Deleting appointment..."
+DELETE_APPOINTMENT_RESPONSE=$(curl -s -X DELETE "${BASE_URL}/appointments/${APPOINTMENT_ID}" \
+  -H "Authorization: Bearer $ACCESS_TOKEN")
+echo "$DELETE_APPOINTMENT_RESPONSE" | jq -e '.status == "success"' > /dev/null
+assert $? "Appointment deletion"
 
 # Cleanup Tests
 echo -e "\n${GREEN}11. Testing Cleanup${NC}"

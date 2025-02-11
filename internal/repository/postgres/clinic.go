@@ -184,3 +184,114 @@ func (r *clinicRepository) RemoveStaff(ctx context.Context, clinicID, userID uui
 	_, err := r.db.ExecContext(ctx, query, clinicID, userID)
 	return err
 }
+
+func (r *clinicRepository) CreateService(ctx context.Context, service *model.Service) error {
+	query := `
+		INSERT INTO services (
+			id, clinic_id, name, description, duration, price, status, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`
+	_, err := r.db.ExecContext(ctx, query,
+		service.ID,
+		service.ClinicID,
+		service.Name,
+		service.Description,
+		service.Duration,
+		service.Price,
+		service.Status,
+		service.CreatedAt,
+		service.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create service: %w", err)
+	}
+	return err
+}
+
+func (r *clinicRepository) GetService(ctx context.Context, serviceID uuid.UUID) (*model.Service, error) {
+	query := `
+		SELECT id, clinic_id, name, description, duration, price, status, created_at, updated_at
+		FROM services
+		WHERE id = $1
+	`
+	var service model.Service
+	err := r.db.GetContext(ctx, &service, query, serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get service: %w", err)
+	}
+	return &service, nil
+}
+
+func (r *clinicRepository) ListServices(ctx context.Context, clinicID uuid.UUID) ([]*model.Service, error) {
+	query := `
+		SELECT id, clinic_id, name, description, duration, price, status, created_at, updated_at
+		FROM services
+		WHERE clinic_id = $1
+		AND (COALESCE($2, '') = '' OR name ILIKE '%' || $2 || '%')
+		AND (COALESCE($3, '') = '' OR status = $3)
+		ORDER BY created_at DESC
+	`
+	var services []*model.Service
+	search := ""
+	if s := ctx.Value("search"); s != nil {
+		search = s.(string)
+	}
+	status := ""
+	if s := ctx.Value("is_active"); s != nil {
+		status = s.(string)
+		if status == "true" {
+			status = "active"
+		} else if status == "false" {
+			status = "inactive"
+		}
+	}
+	log.Printf("Debug - Listing services with search='%s', status='%s'", search, status)
+	err := r.db.SelectContext(ctx, &services, query, clinicID, search, status)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list services: %w", err)
+	}
+	log.Printf("Debug - Found %d services", len(services))
+	return services, err
+}
+
+func (r *clinicRepository) UpdateService(ctx context.Context, service *model.Service) error {
+	log.Printf("Debug - Repository updating service: %+v", service)
+	query := `
+		UPDATE services 
+		SET name = $1, 
+			description = $2, 
+			duration = $3, 
+			price = $4, 
+			status = $5, 
+			updated_at = $6
+		WHERE id = $7 AND clinic_id = $8
+	`
+	result, err := r.db.ExecContext(ctx, query,
+		service.Name,
+		service.Description,
+		service.Duration,
+		service.Price,
+		service.Status,
+		service.UpdatedAt,
+		service.ID,
+		service.ClinicID,
+	)
+	if err != nil {
+		log.Printf("Debug - Service update query error: %v", err)
+		return fmt.Errorf("failed to update service: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("service not found")
+	}
+
+	return nil
+}
+
+func (r *clinicRepository) DeleteService(ctx context.Context, serviceID uuid.UUID) error {
+	return fmt.Errorf("not implemented")
+}

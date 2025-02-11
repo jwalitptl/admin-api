@@ -111,6 +111,11 @@ type (
 		AssignStaff(ctx context.Context, staff *model.ClinicStaff) error
 		ListStaff(ctx context.Context, clinicID uuid.UUID) ([]*model.ClinicStaff, error)
 		RemoveStaff(ctx context.Context, clinicID, userID uuid.UUID) error
+		CreateService(ctx context.Context, service *model.Service) error
+		GetService(ctx context.Context, serviceID uuid.UUID) (*model.Service, error)
+		ListServices(ctx context.Context, clinicID uuid.UUID) ([]*model.Service, error)
+		UpdateService(ctx context.Context, service *model.Service) error
+		DeleteService(ctx context.Context, serviceID uuid.UUID) error
 	}
 
 	UserRepository interface {
