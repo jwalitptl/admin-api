@@ -219,19 +219,36 @@ if [ "$(echo $ROLE_RESPONSE | jq -r '.status')" != "success" ]; then
   echo -e "\n${GREEN}8. Testing Clinic Management${NC}"
 else
   ROLE_ID=$(echo $ROLE_RESPONSE | jq -r '.data.id')
+  echo "Debug - Role ID: $ROLE_ID"
   [ ! -z "$ROLE_ID" ] && [ "$ROLE_ID" != "null" ]
   assert $? "Role creation"
 
   # Assign role to user
   echo "Assigning role to user..."
-  ASSIGN_ROLE_RESPONSE=$(curl -s -X POST "${BASE_URL}/users/${USER_ID}/roles/${ROLE_ID}" \
-    -H "Authorization: Bearer $ACCESS_TOKEN")
-  echo "$ASSIGN_ROLE_RESPONSE" | grep "error" > /dev/null && exit 1
+  echo "Debug - Request URL: ${BASE_URL}/rbac/users/${USER_ID}/roles/${ROLE_ID}"
+  ASSIGN_ROLE_RESPONSE=$(curl -s -X POST "${BASE_URL}/rbac/users/${USER_ID}/roles/${ROLE_ID}" \
+    -H "Authorization: Bearer $ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "organization_id": "'$ORG_ID'"
+    }')
+  # Print response for debugging
+  echo "Role Assignment Response: $ASSIGN_ROLE_RESPONSE"
+  if [ "$(echo $ASSIGN_ROLE_RESPONSE | jq -r '.status')" != "success" ]; then
+    echo "❌ Role assignment failed: $(echo $ASSIGN_ROLE_RESPONSE | jq -r '.message')"
+    exit 1
+  fi
   assert $? "Role assignment"
   
   # Verify user roles
-  USER_ROLES_RESPONSE=$(curl -s -X GET "${BASE_URL}/users/${USER_ID}/roles" \
+  USER_ROLES_RESPONSE=$(curl -s -X GET "${BASE_URL}/rbac/users/${USER_ID}/roles?organization_id=${ORG_ID}" \
     -H "Authorization: Bearer $ACCESS_TOKEN")
+  # Print response for debugging
+  echo "Role Verification Response: $USER_ROLES_RESPONSE"
+  if [ "$(echo $USER_ROLES_RESPONSE | jq -r '.status')" != "success" ]; then
+    echo "❌ Role verification failed: $(echo $USER_ROLES_RESPONSE | jq -r '.message')"
+    exit 1
+  fi
   echo "$USER_ROLES_RESPONSE" | jq -e '.data[] | select(.id=="'$ROLE_ID'")' > /dev/null
   assert $? "Role verification"
 fi
@@ -239,6 +256,13 @@ fi
 # Test Clinic Assignment
 echo -e "\n${GREEN}8. Testing Clinic Management${NC}"
 # Create a test clinic
+echo "Creating test clinic..."
+echo "Debug - Clinic Request: {
+  \"name\": \"Test Clinic\",
+  \"organization_id\": \"$ORG_ID\",
+  \"address\": \"123 Test St\",
+  \"status\": \"active\"
+}"
 CLINIC_RESPONSE=$(curl -s -X POST "${BASE_URL}/clinics" \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
@@ -248,6 +272,7 @@ CLINIC_RESPONSE=$(curl -s -X POST "${BASE_URL}/clinics" \
     "address": "123 Test St",
     "status": "active"
   }')
+echo "Debug - Clinic Response: $CLINIC_RESPONSE"
 CLINIC_ID=$(echo $CLINIC_RESPONSE | jq -r '.data.id')
 [ ! -z "$CLINIC_ID" ] && [ "$CLINIC_ID" != "null" ]
 assert $? "Clinic creation"

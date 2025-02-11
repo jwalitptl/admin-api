@@ -65,6 +65,11 @@ func (h *Handler) RegisterRoutesWithEvents(r *gin.RouterGroup, eventTracker *eve
 		rbac.PUT("/roles/:id", eventTracker.TrackEvent("rbac", "role_update"), h.UpdateRole)
 		rbac.DELETE("/roles/:id", eventTracker.TrackEvent("rbac", "role_delete"), h.DeleteRole)
 
+		// User role assignments
+		rbac.POST("/users/:id/roles/:roleId", eventTracker.TrackEvent("rbac", "role_assign"), h.AssignRoleToClinician)
+		rbac.DELETE("/users/:id/roles/:roleId", eventTracker.TrackEvent("rbac", "role_remove"), h.RemoveRoleFromClinician)
+		rbac.GET("/users/:id/roles", h.ListClinicianRoles)
+
 		// Permissions
 		rbac.POST("/roles/:id/permissions", eventTracker.TrackEvent("rbac", "permission_assign"), h.AssignPermissionToRole)
 		rbac.DELETE("/roles/:id/permissions/:permission_id", eventTracker.TrackEvent("rbac", "permission_remove"), h.RemovePermissionFromRole)
@@ -358,13 +363,21 @@ func (h *Handler) AssignRoleToClinician(c *gin.Context) {
 		return
 	}
 
-	roleID, err := uuid.Parse(c.Param("role_id"))
+	roleID, err := uuid.Parse(c.Param("roleId"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid role ID"))
 		return
 	}
 
-	orgID, err := uuid.Parse(c.Param("org_id"))
+	var req struct {
+		OrganizationID string `json:"organization_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid request body"))
+		return
+	}
+
+	orgID, err := uuid.Parse(req.OrganizationID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid organization ID"))
 		return
@@ -412,7 +425,8 @@ func (h *Handler) ListClinicianRoles(c *gin.Context) {
 		return
 	}
 
-	orgID, err := uuid.Parse(c.Param("org_id"))
+	// Get organization ID from query parameter
+	orgID, err := uuid.Parse(c.Query("organization_id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid organization ID"))
 		return

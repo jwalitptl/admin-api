@@ -34,7 +34,18 @@ CREATE TABLE user_roles (
     PRIMARY KEY (user_id, role_id)
 );
 
+CREATE TABLE clinician_roles (
+    clinician_id UUID REFERENCES users(id),
+    role_id UUID REFERENCES roles(id),
+    organization_id UUID REFERENCES organizations(id),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (clinician_id, role_id, organization_id)
+);
+
 CREATE INDEX idx_roles_name ON roles(name);
 CREATE INDEX idx_permissions_name ON permissions(name);
 CREATE INDEX idx_user_roles_user_id ON user_roles(user_id);
-CREATE INDEX idx_role_permissions_role_id ON role_permissions(role_id); 
+CREATE INDEX idx_role_permissions_role_id ON role_permissions(role_id);
+CREATE INDEX idx_clinician_roles_clinician ON clinician_roles(clinician_id);
+CREATE INDEX idx_clinician_roles_role ON clinician_roles(role_id);
+CREATE INDEX idx_clinician_roles_org ON clinician_roles(organization_id); 
