@@ -108,6 +108,9 @@ type (
 		Update(ctx context.Context, clinic *model.Clinic) error
 		Delete(ctx context.Context, id uuid.UUID) error
 		List(ctx context.Context, organizationID uuid.UUID) ([]*model.Clinic, error)
+		AssignStaff(ctx context.Context, staff *model.ClinicStaff) error
+		ListStaff(ctx context.Context, clinicID uuid.UUID) ([]*model.ClinicStaff, error)
+		RemoveStaff(ctx context.Context, clinicID, userID uuid.UUID) error
 	}
 
 	UserRepository interface {

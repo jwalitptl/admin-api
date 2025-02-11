@@ -40,14 +40,16 @@ func (r *outboxRepository) Create(ctx context.Context, event *model.OutboxEvent)
 	}
 
 	query := `
-		INSERT INTO outbox_events (id, event_type, payload, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO outbox_events (
+			id, event_type, payload, status, created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6
+		)
 	`
-
 	event.ID = uuid.New()
-	event.Status = string(model.OutboxStatusPending)
 	event.CreatedAt = time.Now()
 	event.UpdatedAt = time.Now()
+	event.Status = "pending" // Set default status
 
 	_, err := r.db.ExecContext(ctx, query,
 		event.ID,
@@ -60,7 +62,7 @@ func (r *outboxRepository) Create(ctx context.Context, event *model.OutboxEvent)
 	if err != nil {
 		return fmt.Errorf("failed to create outbox event: %w", err)
 	}
-	return err
+	return nil
 }
 
 func (r *outboxRepository) GetPendingEvents(ctx context.Context, limit int) ([]*model.OutboxEvent, error) {

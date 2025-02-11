@@ -253,7 +253,7 @@ else
   assert $? "Role verification"
 fi
 
-# Test Clinic Assignment
+# Test Clinic Management
 echo -e "\n${GREEN}8. Testing Clinic Management${NC}"
 # Create a test clinic
 echo "Creating test clinic..."
@@ -261,7 +261,8 @@ echo "Debug - Clinic Request: {
   \"name\": \"Test Clinic\",
   \"organization_id\": \"$ORG_ID\",
   \"location\": \"123 Test St\",
-  \"status\": \"active\"
+  \"status\": \"active\",
+  \"region_code\": \"US\"
 }"
 CLINIC_RESPONSE=$(curl -s -X POST "${BASE_URL}/clinics" \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
@@ -270,28 +271,207 @@ CLINIC_RESPONSE=$(curl -s -X POST "${BASE_URL}/clinics" \
     "name": "Test Clinic",
     "organization_id": "'$ORG_ID'",
     "location": "123 Test St",
-    "status": "active"
+    "status": "active",
+    "region_code": "US"
   }')
-echo "Debug - Clinic Response: $CLINIC_RESPONSE"
+echo "Debug - Full Clinic Response: $CLINIC_RESPONSE"
 CLINIC_ID=$(echo $CLINIC_RESPONSE | jq -r '.data.id')
 [ ! -z "$CLINIC_ID" ] && [ "$CLINIC_ID" != "null" ]
 assert $? "Clinic creation"
 
 # Assign user to clinic
 echo "Assigning user to clinic..."
-ASSIGN_CLINIC_RESPONSE=$(curl -s -X POST "${BASE_URL}/users/${USER_ID}/clinics/${CLINIC_ID}" \
-  -H "Authorization: Bearer $ACCESS_TOKEN")
-echo "$ASSIGN_CLINIC_RESPONSE" | grep "error" > /dev/null && exit 1
+ASSIGN_CLINIC_RESPONSE=$(curl -s -X POST "${BASE_URL}/clinics/${CLINIC_ID}/staff" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "'$USER_ID'",
+    "role": "staff"
+  }')
+echo "Clinic Assignment Response: $ASSIGN_CLINIC_RESPONSE"
+if [ "$(echo $ASSIGN_CLINIC_RESPONSE | jq -r '.status')" != "success" ]; then
+  echo "❌ Clinic assignment failed: $(echo $ASSIGN_CLINIC_RESPONSE | jq -r '.message')"
+  exit 1
+fi
 assert $? "Clinic assignment"
 
 # Verify user clinics
-USER_CLINICS_RESPONSE=$(curl -s -X GET "${BASE_URL}/users/${USER_ID}/clinics" \
+USER_CLINICS_RESPONSE=$(curl -s -X GET "${BASE_URL}/clinics/${CLINIC_ID}/staff" \
   -H "Authorization: Bearer $ACCESS_TOKEN")
-echo "$USER_CLINICS_RESPONSE" | jq -e '.data[] | select(.id=="'$CLINIC_ID'")' > /dev/null
+echo "Clinic Staff Response: $USER_CLINICS_RESPONSE"
+echo "$USER_CLINICS_RESPONSE" | jq -e '.data[] | select(.user_id=="'$USER_ID'")' > /dev/null
 assert $? "Clinic verification"
 
+# Test invalid clinic creation (missing required fields)
+echo "Testing invalid clinic creation..."
+INVALID_CLINIC_RESPONSE=$(curl -s -X POST "${BASE_URL}/clinics" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Test Clinic"
+  }')
+echo "$INVALID_CLINIC_RESPONSE" | grep "error" > /dev/null
+assert $? "Invalid clinic creation handling"
+
+# Test duplicate clinic name
+echo "Testing duplicate clinic name..."
+DUPLICATE_CLINIC_RESPONSE=$(curl -s -X POST "${BASE_URL}/clinics" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Test Clinic",
+    "organization_id": "'$ORG_ID'",
+    "location": "123 Test St",
+    "status": "active"
+  }')
+echo "$DUPLICATE_CLINIC_RESPONSE" | grep "error" > /dev/null
+assert $? "Duplicate clinic name handling"
+
+# Test clinic update
+echo "Testing clinic update..."
+UPDATE_CLINIC_RESPONSE=$(curl -s -X PUT "${BASE_URL}/clinics/${CLINIC_ID}" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Updated Test Clinic",
+    "location": "456 New St",
+    "status": "active"
+  }')
+echo "$UPDATE_CLINIC_RESPONSE" | jq -e '.status == "success"' > /dev/null
+assert $? "Clinic update"
+
+# Test clinic search
+echo "Testing clinic search..."
+SEARCH_RESPONSE=$(curl -s -X GET "${BASE_URL}/clinics?organization_id=${ORG_ID}&search=Test" \
+  -H "Authorization: Bearer $ACCESS_TOKEN")
+echo "Debug - Search Response: $SEARCH_RESPONSE"
+
+# Check if the response has data and contains the clinic we created
+echo "$SEARCH_RESPONSE" | jq -e '.data[] | select(.name | contains("Test"))' > /dev/null
+assert $? "Clinic search"
+
+# Also test empty search
+EMPTY_SEARCH=$(curl -s -X GET "${BASE_URL}/clinics?organization_id=${ORG_ID}" \
+  -H "Authorization: Bearer $ACCESS_TOKEN")
+echo "Debug - Empty Search Response: $EMPTY_SEARCH"
+echo "$EMPTY_SEARCH" | jq -e '.data' > /dev/null
+assert $? "Empty clinic search"
+
+# Test clinic filtering by status
+echo "Testing clinic filtering..."
+FILTER_CLINIC_RESPONSE=$(curl -s -X GET "${BASE_URL}/clinics?organization_id=${ORG_ID}&status=active" \
+  -H "Authorization: Bearer $ACCESS_TOKEN")
+echo "Debug - Filter Response: $FILTER_CLINIC_RESPONSE"
+echo "$FILTER_CLINIC_RESPONSE" | jq -e '.data | length > 0' > /dev/null
+assert $? "Clinic filtering"
+
+# Test clinic staff assignment
+echo "Testing clinic staff assignment..."
+STAFF_ASSIGN_RESPONSE=$(curl -s -X POST "${BASE_URL}/clinics/${CLINIC_ID}/staff" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "'$USER_ID'",
+    "role": "doctor"
+  }')
+echo "$STAFF_ASSIGN_RESPONSE" | jq -e '.status == "success"' > /dev/null
+assert $? "Clinic staff assignment"
+
+# Test clinic staff listing
+echo "Testing clinic staff listing..."
+STAFF_LIST_RESPONSE=$(curl -s -X GET "${BASE_URL}/clinics/${CLINIC_ID}/staff" \
+  -H "Authorization: Bearer $ACCESS_TOKEN")
+echo "$STAFF_LIST_RESPONSE" | jq -e '.data | length > 0' > /dev/null
+assert $? "Clinic staff listing"
+
+# Test Service Management
+echo -e "\n${GREEN}9. Testing Service Management${NC}"
+
+# Create a service
+echo "Creating medical service..."
+SERVICE_RESPONSE=$(curl -s -X POST "${BASE_URL}/clinics/${CLINIC_ID}/services" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "General Consultation",
+    "description": "Standard medical consultation",
+    "duration": 30,
+    "price": 100.00,
+    "is_active": true,
+    "requires_auth": false,
+    "max_capacity": 1
+  }')
+echo "Service Response: $SERVICE_RESPONSE"
+SERVICE_ID=$(echo $SERVICE_RESPONSE | jq -r '.data.id')
+[ ! -z "$SERVICE_ID" ] && [ "$SERVICE_ID" != "null" ]
+assert $? "Service creation"
+
+# Test invalid service creation
+echo "Testing invalid service creation..."
+INVALID_SERVICE_RESPONSE=$(curl -s -X POST "${BASE_URL}/clinics/${CLINIC_ID}/services" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Invalid Service"
+  }')
+echo "$INVALID_SERVICE_RESPONSE" | grep "error" > /dev/null
+assert $? "Invalid service creation handling"
+
+# Test service update
+echo "Testing service update..."
+UPDATE_SERVICE_RESPONSE=$(curl -s -X PUT "${BASE_URL}/clinics/${CLINIC_ID}/services/${SERVICE_ID}" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Updated Consultation",
+    "price": 120.00,
+    "duration": 45
+  }')
+echo "$UPDATE_SERVICE_RESPONSE" | jq -e '.status == "success"' > /dev/null
+assert $? "Service update"
+
+# Test service listing
+echo "Testing service listing..."
+SERVICE_LIST_RESPONSE=$(curl -s -X GET "${BASE_URL}/clinics/${CLINIC_ID}/services" \
+  -H "Authorization: Bearer $ACCESS_TOKEN")
+echo "$SERVICE_LIST_RESPONSE" | jq -e '.data | length > 0' > /dev/null
+assert $? "Service listing"
+
+# Test service filtering
+echo "Testing service filtering..."
+ACTIVE_SERVICES_RESPONSE=$(curl -s -X GET "${BASE_URL}/clinics/${CLINIC_ID}/services?is_active=true" \
+  -H "Authorization: Bearer $ACCESS_TOKEN")
+echo "$ACTIVE_SERVICES_RESPONSE" | jq -e '.data | length > 0' > /dev/null
+assert $? "Service filtering"
+
+# Test service search
+echo "Testing service search..."
+SEARCH_SERVICE_RESPONSE=$(curl -s -X GET "${BASE_URL}/clinics/${CLINIC_ID}/services?search=Consultation" \
+  -H "Authorization: Bearer $ACCESS_TOKEN")
+echo "$SEARCH_SERVICE_RESPONSE" | jq -e '.data | length > 0' > /dev/null
+assert $? "Service search"
+
+# Test service deactivation
+echo "Testing service deactivation..."
+DEACTIVATE_RESPONSE=$(curl -s -X PATCH "${BASE_URL}/clinics/${CLINIC_ID}/services/${SERVICE_ID}/deactivate" \
+  -H "Authorization: Bearer $ACCESS_TOKEN")
+echo "$DEACTIVATE_RESPONSE" | jq -e '.status == "success"' > /dev/null
+assert $? "Service deactivation"
+
+# Test bulk service update
+echo "Testing bulk service update..."
+BULK_UPDATE_RESPONSE=$(curl -s -X PUT "${BASE_URL}/clinics/${CLINIC_ID}/services/bulk" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "price_adjustment": 10,
+    "service_ids": ["'$SERVICE_ID'"]
+  }')
+echo "$BULK_UPDATE_RESPONSE" | jq -e '.status == "success"' > /dev/null
+assert $? "Bulk service update"
+
 # Test Error Cases
-echo -e "\n${GREEN}9. Testing Error Cases${NC}"
+echo -e "\n${GREEN}10. Testing Error Cases${NC}"
 # Test invalid user ID
 INVALID_USER_RESPONSE=$(curl -s -X GET "${BASE_URL}/users/invalid-uuid" \
   -H "Authorization: Bearer $ACCESS_TOKEN")
@@ -311,7 +491,7 @@ echo "$INVALID_ROLE_RESPONSE" | grep "error" > /dev/null
 assert $? "Invalid role assignment handling"
 
 # Cleanup Tests
-echo -e "\n${GREEN}10. Testing Cleanup${NC}"
+echo -e "\n${GREEN}11. Testing Cleanup${NC}"
 # Remove role assignment
 echo "Removing role assignment..."
 curl -s -X DELETE "${BASE_URL}/users/${USER_ID}/roles/${ROLE_ID}" \
@@ -326,5 +506,10 @@ curl -s -X DELETE "${BASE_URL}/users/${USER_ID}/clinics/${CLINIC_ID}" \
 curl -s -X DELETE "${BASE_URL}/roles/${ROLE_ID}" -H "Authorization: Bearer $ACCESS_TOKEN"
 curl -s -X DELETE "${BASE_URL}/clinics/${CLINIC_ID}" -H "Authorization: Bearer $ACCESS_TOKEN"
 curl -s -X DELETE "${BASE_URL}/users/${USER_ID}" -H "Authorization: Bearer $ACCESS_TOKEN"
+
+# Delete test service
+echo "Deleting test service..."
+curl -s -X DELETE "${BASE_URL}/clinics/${CLINIC_ID}/services/${SERVICE_ID}" \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
 
 echo -e "\n${GREEN}✨ All tests completed successfully!${NC}" 

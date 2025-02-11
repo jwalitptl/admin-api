@@ -11,4 +11,12 @@ CREATE TABLE clinics (
     CONSTRAINT chk_clinic_status CHECK (status IN ('active', 'inactive', 'suspended'))
 );
 
-CREATE INDEX idx_clinics_organization ON clinics(organization_id); 
+CREATE INDEX idx_clinics_organization ON clinics(organization_id);
+
+CREATE TABLE clinic_staff (
+    clinic_id UUID REFERENCES clinics(id),
+    user_id UUID REFERENCES users(id),
+    role VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (clinic_id, user_id)
+); 

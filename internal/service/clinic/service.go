@@ -3,6 +3,7 @@ package clinic
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,7 +18,10 @@ type ClinicServicer interface {
 	GetClinic(ctx context.Context, id uuid.UUID) (*model.Clinic, error)
 	UpdateClinic(ctx context.Context, clinic *model.Clinic) error
 	DeleteClinic(ctx context.Context, id uuid.UUID) error
-	ListClinics(ctx context.Context, organizationID uuid.UUID) ([]*model.Clinic, error)
+	ListClinics(ctx context.Context, organizationID uuid.UUID, search, status string) ([]*model.Clinic, error)
+	AssignStaff(ctx context.Context, clinicID, userID uuid.UUID, role string) error
+	ListStaff(ctx context.Context, clinicID uuid.UUID) ([]*model.ClinicStaff, error)
+	RemoveStaff(ctx context.Context, clinicID, userID uuid.UUID) error
 }
 
 type Service struct {
@@ -94,11 +98,15 @@ func (s *Service) DeleteClinic(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (s *Service) ListClinics(ctx context.Context, organizationID uuid.UUID) ([]*model.Clinic, error) {
+func (s *Service) ListClinics(ctx context.Context, organizationID uuid.UUID, search, status string) ([]*model.Clinic, error) {
+	ctx = context.WithValue(ctx, "search", search)
+	ctx = context.WithValue(ctx, "status", status)
 	clinics, err := s.repo.List(ctx, organizationID)
 	if err != nil {
+		log.Printf("Debug - Repository error: %v", err)
 		return nil, fmt.Errorf("failed to list clinics: %w", err)
 	}
+	log.Printf("Debug - Found %d clinics", len(clinics))
 	return clinics, nil
 }
 
@@ -111,6 +119,18 @@ func (s *Service) validateClinic(clinic *model.Clinic) error {
 		return fmt.Errorf("clinic name is required")
 	}
 
+	// Check for duplicate name in the same organization
+	existingClinics, err := s.repo.List(context.Background(), clinic.OrganizationID)
+	if err != nil {
+		return fmt.Errorf("failed to check for duplicate names: %w", err)
+	}
+
+	for _, existing := range existingClinics {
+		if existing.Name == clinic.Name && existing.ID != clinic.ID {
+			return fmt.Errorf("clinic with name '%s' already exists in this organization", clinic.Name)
+		}
+	}
+
 	if clinic.Location == "" {
 		return fmt.Errorf("clinic location is required")
 	}
@@ -120,4 +140,22 @@ func (s *Service) validateClinic(clinic *model.Clinic) error {
 	}
 
 	return nil
+}
+
+func (s *Service) AssignStaff(ctx context.Context, clinicID, userID uuid.UUID, role string) error {
+	staff := &model.ClinicStaff{
+		ClinicID:  clinicID,
+		UserID:    userID,
+		Role:      role,
+		CreatedAt: time.Now(),
+	}
+	return s.repo.AssignStaff(ctx, staff)
+}
+
+func (s *Service) ListStaff(ctx context.Context, clinicID uuid.UUID) ([]*model.ClinicStaff, error) {
+	return s.repo.ListStaff(ctx, clinicID)
+}
+
+func (s *Service) RemoveStaff(ctx context.Context, clinicID, userID uuid.UUID) error {
+	return s.repo.RemoveStaff(ctx, clinicID, userID)
 }
