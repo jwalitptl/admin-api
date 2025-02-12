@@ -3,6 +3,7 @@ package clinic
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -191,31 +192,19 @@ func (h *Handler) DeleteClinic(c *gin.Context) {
 		return
 	}
 
-	_, err = h.service.GetClinic(c.Request.Context(), id)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
+	// First delete associated clinic_staff records
+	if err := h.service.DeleteClinicStaff(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(fmt.Sprintf("failed to delete clinic staff: %v", err)))
 		return
 	}
 
+	// Then delete the clinic
 	if err := h.service.DeleteClinic(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
+		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(fmt.Sprintf("failed to delete clinic: %v", err)))
 		return
 	}
 
-	// Create outbox event for delete
-	payload, err := json.Marshal(map[string]interface{}{"id": id})
-	if err != nil {
-		log.Printf("Failed to marshal clinic ID for event: %v", err)
-	} else {
-		if err := h.outboxRepo.Create(c.Request.Context(), &model.OutboxEvent{
-			EventType: "CLINIC_DELETE",
-			Payload:   payload,
-		}); err != nil {
-			log.Printf("Failed to create outbox event: %v", err)
-		}
-	}
-
-	c.JSON(http.StatusOK, handler.NewSuccessResponse(nil))
+	c.JSON(http.StatusOK, handler.NewSuccessResponse("clinic deleted successfully"))
 }
 
 func (h *Handler) ListClinics(c *gin.Context) {
@@ -442,11 +431,11 @@ func (h *Handler) DeleteService(c *gin.Context) {
 	}
 
 	if err := h.service.DeleteService(c.Request.Context(), clinicID, serviceID); err != nil {
-		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
+		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(fmt.Sprintf("failed to delete service: %v", err)))
 		return
 	}
 
-	c.JSON(http.StatusOK, handler.NewSuccessResponse(nil))
+	c.JSON(http.StatusOK, handler.NewSuccessResponse("service deleted successfully"))
 }
 
 func (h *Handler) DeactivateService(c *gin.Context) {

@@ -79,3 +79,18 @@ func NewEventTrackerMiddleware(svc interface{}) *EventTrackerMiddleware {
 		eventService: svc,
 	}
 }
+
+func (t *EventTracker) Track(resource, operation string) gin.HandlerFunc {
+	return t.TrackEvent(resource, operation)
+}
+
+func (t *EventTracker) TrackEvent(resource, operation string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		eventCtx := &EventContext{
+			Resource:  resource,
+			Operation: operation,
+		}
+		c.Set("eventCtx", eventCtx)
+		c.Next()
+	}
+}

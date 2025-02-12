@@ -2,6 +2,7 @@ package appointment
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/jwalitptl/admin-api/internal/repository"
 	"github.com/jwalitptl/admin-api/internal/service/audit"
 	"github.com/jwalitptl/admin-api/internal/service/notification"
+	"github.com/rs/zerolog"
 )
 
 // Add these constants for business rules
@@ -26,14 +28,18 @@ type Service struct {
 	notifSvc     notification.Service
 	auditor      *audit.Service
 	clinicianSvc repository.ClinicianRepository
+	outboxRepo   repository.OutboxRepository
+	log          zerolog.Logger
 }
 
-func NewService(repo repository.AppointmentRepository, notifSvc notification.Service, clinicianSvc repository.ClinicianRepository, auditor *audit.Service) *Service {
+func NewService(repo repository.AppointmentRepository, notifSvc notification.Service, clinicianSvc repository.ClinicianRepository, auditor *audit.Service, outboxRepo repository.OutboxRepository, log zerolog.Logger) *Service {
 	return &Service{
 		repo:         repo,
 		notifSvc:     notifSvc,
 		clinicianSvc: clinicianSvc,
 		auditor:      auditor,
+		outboxRepo:   outboxRepo,
+		log:          log,
 	}
 }
 
@@ -97,28 +103,36 @@ func (s *Service) GetAppointment(ctx context.Context, id uuid.UUID) (*model.Appo
 	return apt, nil
 }
 
-func (s *Service) UpdateAppointment(ctx context.Context, apt *model.Appointment) error {
-	if err := s.validateAppointment(apt); err != nil {
-		return fmt.Errorf("invalid appointment: %w", err)
+func (s *Service) UpdateAppointment(ctx context.Context, appointment *model.Appointment) error {
+	// Validate appointment exists
+	existing, err := s.repo.Get(ctx, appointment.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get appointment: %w", err)
 	}
 
-	apt.UpdatedAt = time.Now()
-	if err := s.repo.Update(ctx, apt); err != nil {
+	// Keep existing values for fields that weren't updated
+	if appointment.AppointmentType == "" {
+		appointment.AppointmentType = existing.AppointmentType
+	}
+	if appointment.Status == "" {
+		appointment.Status = existing.Status
+	}
+
+	// Update the appointment
+	if err := s.repo.Update(ctx, appointment); err != nil {
 		return fmt.Errorf("failed to update appointment: %w", err)
 	}
 
-	// Send notifications
-	if err := s.notifyParticipants(ctx, apt, "appointment_updated"); err != nil {
-		s.auditor.Log(ctx, apt.PatientID, apt.ClinicID, "notification_failed", "appointment", apt.ID, &audit.LogOptions{
-			Metadata: map[string]interface{}{
-				"error": err.Error(),
-			},
-		})
+	// Create outbox event
+	payload, err := json.Marshal(appointment)
+	if err == nil {
+		if err := s.outboxRepo.Create(ctx, &model.OutboxEvent{
+			EventType: "APPOINTMENT_UPDATE",
+			Payload:   payload,
+		}); err != nil {
+			s.log.Info().Msgf("failed to create outbox event: %v", err)
+		}
 	}
-
-	s.auditor.Log(ctx, apt.PatientID, apt.ClinicID, "update", "appointment", apt.ID, &audit.LogOptions{
-		Changes: apt,
-	})
 
 	return nil
 }

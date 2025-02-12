@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -17,11 +16,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/sdk/resource"
-	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/time/rate"
 
@@ -32,8 +27,6 @@ import (
 	"github.com/jwalitptl/admin-api/internal/service/appointment"
 	"github.com/jwalitptl/admin-api/pkg/event"
 	"github.com/sony/gobreaker"
-	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 type Handler struct {
@@ -515,71 +508,56 @@ func (h *Handler) ListAppointments(c *gin.Context) {
 }
 
 func (h *Handler) UpdateAppointment(c *gin.Context) {
-	ctx, cancel := context.WithTimeout(c.Request.Context(), defaultTimeout)
-	defer cancel()
+	fmt.Printf("Debug - Starting appointment update\n")
+	var req model.UpdateAppointmentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fmt.Printf("Debug - Bind JSON error: %v\n", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	fmt.Printf("Debug - Update request: %+v\n", req)
 
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid appointment ID"))
+		fmt.Printf("Debug - Invalid appointment ID: %v\n", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid appointment ID"})
 		return
 	}
 
-	var req model.UpdateAppointmentRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, handler.NewErrorResponse(err.Error()))
-		return
-	}
-
-	_, err = h.service.GetAppointment(ctx, id)
+	// First get the existing appointment
+	appointment, err := h.service.GetAppointment(c, id)
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			c.JSON(http.StatusGatewayTimeout, handler.NewErrorResponse("request timeout"))
-			return
-		}
-		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
+		fmt.Printf("Debug - Failed to get appointment: %v\n", err)
+		c.JSON(http.StatusNotFound, gin.H{"error": "appointment not found"})
 		return
 	}
+	fmt.Printf("Debug - Found existing appointment: %+v\n", appointment)
 
-	appointment := &model.Appointment{
-		Base: model.Base{
-			ID: id,
-		},
-		StartTime: *req.StartTime,
-		EndTime:   *req.EndTime,
-		Status:    *req.Status,
-		Notes:     *req.Notes,
+	// Update only the fields that were provided
+	if req.AppointmentType != "" {
+		appointment.AppointmentType = req.AppointmentType
 	}
-	err = h.service.UpdateAppointment(ctx, appointment)
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			c.JSON(http.StatusGatewayTimeout, handler.NewErrorResponse("request timeout"))
-			return
-		}
-		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
-		return
-	}
-
-	// Invalidate cache
-	h.invalidateAppointmentCache(id)
-	// Invalidate availability cache for the affected date
 	if req.StartTime != nil {
-		h.invalidateAvailabilityCache(appointment.ClinicianID, req.StartTime.Format("2006-01-02"))
+		appointment.StartTime = *req.StartTime
+	}
+	if req.EndTime != nil {
+		appointment.EndTime = *req.EndTime
+	}
+	if req.Status != "" {
+		appointment.Status = model.AppointmentStatus(req.Status)
+	}
+	if req.Notes != nil {
+		appointment.Notes = *req.Notes
+	}
+	fmt.Printf("Debug - Updated appointment: %+v\n", appointment)
+
+	if err := h.service.UpdateAppointment(c, appointment); err != nil {
+		fmt.Printf("Debug - Failed to update appointment: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to update appointment: %v", err)})
+		return
 	}
 
-	// Create outbox event for update
-	payload, err := json.Marshal(appointment)
-	if err != nil {
-		log.Info().Msgf("failed to marshal appointment for event: %v", err)
-	} else {
-		if err := h.outboxRepo.Create(ctx, &model.OutboxEvent{
-			EventType: "APPOINTMENT_UPDATE",
-			Payload:   payload,
-		}); err != nil {
-			log.Info().Msgf("failed to create outbox event: %v", err)
-		}
-	}
-
-	c.JSON(http.StatusOK, handler.NewSuccessResponse(nil))
+	c.JSON(http.StatusOK, gin.H{"status": "success", "data": appointment})
 }
 
 func (h *Handler) DeleteAppointment(c *gin.Context) {
@@ -635,18 +613,20 @@ func (h *Handler) DeleteAppointment(c *gin.Context) {
 }
 
 func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
+	fmt.Printf("Debug - Registering appointment routes\n")
 	appointments := r.Group("/appointments")
-	appointments.Use(otelgin.Middleware("appointment-service"))
-	appointments.Use(h.rateLimitMiddleware)
 	{
-		appointments.GET("/health", h.HealthCheck)
+		// Non-parameterized routes first
 		appointments.GET("/availability", h.GetClinicianAvailability)
 		appointments.POST("", h.CreateAppointment)
 		appointments.GET("", h.ListAppointments)
+		// Parameterized routes last
 		appointments.GET("/:id", h.GetAppointment)
 		appointments.PUT("/:id", h.UpdateAppointment)
+		appointments.PUT("/:id/cancel", h.CancelAppointment)
 		appointments.DELETE("/:id", h.DeleteAppointment)
 	}
+	fmt.Printf("Debug - Finished registering appointment routes\n")
 }
 
 func (h *Handler) GetClinicianAvailability(c *gin.Context) {
@@ -731,6 +711,9 @@ func (h *Handler) RegisterRoutesWithEvents(r *gin.RouterGroup, eventTracker *eve
 		appointments.DELETE("/:id", eventTracker.TrackEvent("appointment", "delete"), h.DeleteAppointment)
 		appointments.GET("", h.ListAppointments)
 		appointments.GET("/:id", h.GetAppointment)
+		// Support both POST and PUT for cancel
+		appointments.POST("/:id/cancel", eventTracker.TrackEvent("appointment", "cancel"), h.CancelAppointment)
+		appointments.PUT("/:id/cancel", eventTracker.TrackEvent("appointment", "cancel"), h.CancelAppointment)
 	}
 }
 
@@ -772,49 +755,26 @@ func (h *Handler) invalidateAvailabilityCache(clinicianID uuid.UUID, date string
 	h.cache.Delete(cacheKey)
 }
 
-func (h *Handler) startOperation(ctx context.Context, name string) (context.Context, trace.Span) {
-	return h.tracer.Start(ctx, name,
-		trace.WithAttributes(
-			attribute.String("component", "appointment-handler"),
-			attribute.String("operation", name),
-		),
-	)
-}
-
-func (h *Handler) recordSpanError(span trace.Span, err error, msg string) {
-	span.RecordError(err)
-	span.SetStatus(codes.Error, msg)
-	span.SetAttributes(attribute.String("error", err.Error()))
-}
-
-func initTracer() (*sdktrace.TracerProvider, error) {
-	opts := []sdktrace.TracerProviderOption{
-		sdktrace.WithSampler(sdktrace.ParentBased(
-			sdktrace.TraceIDRatioBased(0.1), // Sample 10% of traces
-		)),
-		sdktrace.WithResource(resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceNameKey.String("appointment-service"),
-			semconv.ServiceVersionKey.String("1.0.0"),
-			attribute.String("environment", os.Getenv("APP_ENV")),
-		)),
+func (h *Handler) CancelAppointment(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid appointment ID"))
+		return
 	}
 
-	if exporterEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); exporterEndpoint != "" {
-		exporter, err := otlptrace.New(
-			context.Background(),
-			otlptracegrpc.NewClient(
-				otlptracegrpc.WithEndpoint(exporterEndpoint),
-				otlptracegrpc.WithInsecure(),
-			),
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
-		}
-		opts = append(opts, sdktrace.WithBatcher(exporter))
+	// Just check if appointment exists
+	if _, err := h.service.GetAppointment(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusNotFound, handler.NewErrorResponse("appointment not found"))
+		return
 	}
 
-	tp := sdktrace.NewTracerProvider(opts...)
-	otel.SetTracerProvider(tp)
-	return tp, nil
+	if err := h.service.CancelAppointment(c.Request.Context(), id, "Cancelled by user"); err != nil {
+		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, handler.NewSuccessResponse(map[string]interface{}{
+		"id":     id,
+		"status": "cancelled",
+	}))
 }

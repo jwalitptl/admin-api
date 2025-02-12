@@ -116,6 +116,7 @@ type (
 		ListServices(ctx context.Context, clinicID uuid.UUID) ([]*model.Service, error)
 		UpdateService(ctx context.Context, service *model.Service) error
 		DeleteService(ctx context.Context, serviceID uuid.UUID) error
+		DeleteClinicStaff(ctx context.Context, clinicID uuid.UUID) error
 	}
 
 	UserRepository interface {

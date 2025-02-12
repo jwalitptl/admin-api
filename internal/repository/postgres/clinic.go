@@ -293,5 +293,36 @@ func (r *clinicRepository) UpdateService(ctx context.Context, service *model.Ser
 }
 
 func (r *clinicRepository) DeleteService(ctx context.Context, serviceID uuid.UUID) error {
-	return fmt.Errorf("not implemented")
+	query := `DELETE FROM services WHERE id = $1`
+	_, err := r.db.ExecContext(ctx, query, serviceID)
+	if err != nil {
+		return fmt.Errorf("failed to delete service: %w", err)
+	}
+	return nil
+}
+
+func (r *clinicRepository) DeleteClinic(ctx context.Context, id uuid.UUID) error {
+	// Delete in order: patients -> clinic_staff -> clinic
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Delete patients
+	if _, err := tx.ExecContext(ctx, `DELETE FROM patients WHERE clinic_id = $1`, id); err != nil {
+		return fmt.Errorf("failed to delete patients: %w", err)
+	}
+
+	// Delete clinic staff
+	if _, err := tx.ExecContext(ctx, `DELETE FROM clinic_staff WHERE clinic_id = $1`, id); err != nil {
+		return fmt.Errorf("failed to delete clinic staff: %w", err)
+	}
+
+	// Delete clinic
+	if _, err := tx.ExecContext(ctx, `DELETE FROM clinics WHERE id = $1`, id); err != nil {
+		return fmt.Errorf("failed to delete clinic: %w", err)
+	}
+
+	return tx.Commit()
 }

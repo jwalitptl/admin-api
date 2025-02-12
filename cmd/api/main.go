@@ -130,7 +130,7 @@ func main() {
 	rbacSvc := rbacService.NewService(rbacRepo, auditSvc)
 	authSvc := auth.NewService(userRepo, jwtSvc, tokenRepo, emailSvc, auditSvc)
 	notificationSvc := notification.NewService(notificationRepo, emailSvc, broker, auditSvc)
-	appointmentSvc := appointmentService.NewService(appointmentRepo, notificationSvc, clinicianRepo, auditSvc)
+	appointmentSvc := appointmentService.NewService(appointmentRepo, notificationSvc, clinicianRepo, auditSvc, outboxRepo, log.Logger)
 	permSvc := permissionService.NewService(permRepo, auditSvc)
 	regionSvc := region.NewService(regionRepo, geoIP, auditSvc, defaultConfig)
 

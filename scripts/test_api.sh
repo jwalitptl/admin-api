@@ -602,7 +602,11 @@ UPDATE_APPOINTMENT_RESPONSE=$(curl -s -X PUT "${BASE_URL}/appointments/${APPOINT
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "status": "confirmed"
+    "status": "confirmed",
+    "appointment_type": "regular",
+    "start_time": "'$(date -v+1d +"%Y-%m-%dT10:00:00Z")'",
+    "end_time": "'$(date -v+1d +"%Y-%m-%dT11:00:00Z")'",
+    "notes": "Updated test appointment"
   }')
 echo "$UPDATE_APPOINTMENT_RESPONSE" | jq -e '.status == "success"' > /dev/null
 assert $? "Appointment update"
@@ -611,7 +615,10 @@ assert $? "Appointment update"
 echo "Canceling appointment..."
 CANCEL_APPOINTMENT_RESPONSE=$(curl -s -X PUT "${BASE_URL}/appointments/${APPOINTMENT_ID}/cancel" \
   -H "Authorization: Bearer $ACCESS_TOKEN")
-echo "$CANCEL_APPOINTMENT_RESPONSE" | jq -e '.status == "success"' > /dev/null
+# Debug print the response
+echo "Cancel Response: $CANCEL_APPOINTMENT_RESPONSE"
+# Check if response contains success status
+echo "$CANCEL_APPOINTMENT_RESPONSE" | jq -r '.status' | grep -q "success"
 assert $? "Appointment cancellation"
 
 # Delete appointment

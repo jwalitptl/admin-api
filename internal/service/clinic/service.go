@@ -28,6 +28,7 @@ type ClinicServicer interface {
 	DeleteService(ctx context.Context, clinicID, serviceID uuid.UUID) error
 	DeactivateService(ctx context.Context, clinicID, serviceID uuid.UUID) error
 	GetService(ctx context.Context, clinicID, serviceID uuid.UUID) (*model.Service, error)
+	DeleteClinicStaff(ctx context.Context, clinicID uuid.UUID) error
 }
 
 type Service struct {
@@ -286,4 +287,8 @@ func (s *Service) GetService(ctx context.Context, clinicID, serviceID uuid.UUID)
 		return nil, fmt.Errorf("failed to get service: %w", err)
 	}
 	return service, nil
+}
+
+func (s *Service) DeleteClinicStaff(ctx context.Context, clinicID uuid.UUID) error {
+	return s.repo.DeleteClinicStaff(ctx, clinicID)
 }

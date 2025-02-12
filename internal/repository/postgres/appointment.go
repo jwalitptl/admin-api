@@ -33,10 +33,6 @@ func (r *appointmentRepository) Create(ctx context.Context, appointment *model.A
 			)
 		`
 
-		appointment.ID = uuid.New()
-		appointment.CreatedAt = time.Now()
-		appointment.UpdatedAt = time.Now()
-
 		_, err := tx.ExecContext(ctx, query,
 			appointment.ID,
 			appointment.ClinicID,
@@ -49,8 +45,8 @@ func (r *appointmentRepository) Create(ctx context.Context, appointment *model.A
 			appointment.StartTime,
 			appointment.EndTime,
 			appointment.Notes,
-			appointment.CreatedAt,
-			appointment.UpdatedAt,
+			time.Now(),
+			time.Now(),
 		)
 		return err
 	})
@@ -58,13 +54,15 @@ func (r *appointmentRepository) Create(ctx context.Context, appointment *model.A
 
 func (r *appointmentRepository) Get(ctx context.Context, id uuid.UUID) (*model.Appointment, error) {
 	query := `
-		SELECT * FROM appointments 
+		SELECT id, clinic_id, patient_id, clinician_id, staff_id, service_id,
+			   appointment_type, status, start_time, end_time, notes,
+			   created_at, updated_at, deleted_at
+		FROM appointments 
 		WHERE id = $1 AND deleted_at IS NULL
-		AND region_code = $2
 	`
 
 	var appointment model.Appointment
-	if err := r.GetDB().GetContext(ctx, &appointment, query, id, r.GetRegionFromContext(ctx)); err != nil {
+	if err := r.GetDB().GetContext(ctx, &appointment, query, id); err != nil {
 		return nil, fmt.Errorf("failed to get appointment: %w", err)
 	}
 
@@ -78,8 +76,9 @@ func (r *appointmentRepository) Update(ctx context.Context, appointment *model.A
 			end_time = $2,
 			status = $3,
 			notes = $4,
-			updated_at = $5
-		WHERE id = $6 AND deleted_at IS NULL
+			appointment_type = $5,
+			updated_at = $6
+		WHERE id = $7 AND deleted_at IS NULL
 	`
 
 	result, err := r.GetDB().ExecContext(ctx, query,
@@ -87,7 +86,8 @@ func (r *appointmentRepository) Update(ctx context.Context, appointment *model.A
 		appointment.EndTime,
 		appointment.Status,
 		appointment.Notes,
-		appointment.UpdatedAt,
+		appointment.AppointmentType,
+		time.Now(),
 		appointment.ID,
 	)
 	if err != nil {

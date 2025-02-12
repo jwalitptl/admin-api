@@ -44,11 +44,11 @@ type CreateAppointmentRequest struct {
 }
 
 type UpdateAppointmentRequest struct {
-	StartTime    *time.Time         `json:"start_time"`
-	EndTime      *time.Time         `json:"end_time"`
-	Status       *AppointmentStatus `json:"status"`
-	Notes        *string            `json:"notes"`
-	CancelReason *string            `json:"cancel_reason"`
+	StartTime       *time.Time `json:"start_time,omitempty"`
+	EndTime         *time.Time `json:"end_time,omitempty"`
+	Status          string     `json:"status,omitempty"`
+	Notes           *string    `json:"notes,omitempty"`
+	AppointmentType string     `json:"appointment_type,omitempty"`
 }
 
 type TimeSlot struct {
