@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"github.com/jwalitptl/admin-api/internal/model"
 	"github.com/jwalitptl/admin-api/internal/repository"
 )
 
@@ -78,13 +79,13 @@ func (r *tokenRepository) InvalidateResetToken(ctx context.Context, token string
 
 func (r *tokenRepository) StoreVerificationToken(ctx context.Context, userID uuid.UUID, token string, expiry time.Time) error {
 	query := `
-		INSERT INTO user_tokens (user_id, token, type, expires_at, created_at)
-		VALUES ($1, $2, 'verification', $3, NOW())
+		INSERT INTO user_tokens (id, user_id, token, type, expires_at, created_at, updated_at)
+		VALUES ($1, $2, $3, 'verification', $4, NOW(), NOW())
 		ON CONFLICT (user_id, type) DO UPDATE
-		SET token = $2, expires_at = $3, updated_at = NOW()
+		SET token = $3, expires_at = $4, updated_at = NOW()
 	`
 
-	_, err := r.GetDB().ExecContext(ctx, query, userID, token, expiry)
+	_, err := r.GetDB().ExecContext(ctx, query, uuid.New(), userID, token, expiry)
 	if err != nil {
 		return fmt.Errorf("failed to store verification token: %w", err)
 	}
@@ -143,4 +144,29 @@ func (r *tokenRepository) InvalidateToken(ctx context.Context, token string) err
 		return fmt.Errorf("token not found or already used")
 	}
 	return nil
+}
+
+func generateToken() string {
+	return uuid.New().String()
+}
+
+func (r *tokenRepository) CreateToken(ctx context.Context, userID uuid.UUID, tokenType string) (*model.UserToken, error) {
+	token := &model.UserToken{
+		ID:        uuid.New(),
+		UserID:    userID,
+		Token:     generateToken(),
+		Type:      tokenType,
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	query := `INSERT INTO user_tokens (id, user_id, token, type, expires_at, created_at, updated_at) 
+			  VALUES ($1, $2, $3, $4, $5, $6, $7)`
+
+	_, err := r.GetDB().ExecContext(ctx, query, token.ID, token.UserID, token.Token, token.Type, token.ExpiresAt, token.CreatedAt, token.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to store verification token: %w", err)
+	}
+	return token, nil
 }

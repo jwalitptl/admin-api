@@ -48,7 +48,7 @@ import (
 	authHandler "github.com/jwalitptl/admin-api/internal/handler/auth"
 	"github.com/jwalitptl/admin-api/internal/handler/clinic"
 	"github.com/jwalitptl/admin-api/internal/handler/organization"
-	"github.com/jwalitptl/admin-api/internal/handler/patient"
+	patientHandler "github.com/jwalitptl/admin-api/internal/handler/patient"
 	permissionHandler "github.com/jwalitptl/admin-api/internal/handler/permission"
 	rbacHandler "github.com/jwalitptl/admin-api/internal/handler/rbac"
 	"github.com/jwalitptl/admin-api/internal/handler/user"
@@ -125,13 +125,13 @@ func main() {
 	// Initialize business services
 	accountSvc := accountService.NewService(accountRepo, organizationRepo, emailSvc, auditSvc)
 	clinicSvc := clinicService.NewService(clinicRepo, auditSvc)
-	userSvc := userService.NewService(userRepo, emailSvc, tokenRepo, auditSvc)
+	patientSvc := patientService.NewService(patientRepo, medicalRecordRepo, appointmentRepo, auditSvc)
+	userSvc := userService.NewService(userRepo, emailSvc, tokenRepo, auditSvc, patientSvc)
 	rbacSvc := rbacService.NewService(rbacRepo, auditSvc)
 	authSvc := auth.NewService(userRepo, jwtSvc, tokenRepo, emailSvc, auditSvc)
 	notificationSvc := notification.NewService(notificationRepo, emailSvc, broker, auditSvc)
 	appointmentSvc := appointmentService.NewService(appointmentRepo, notificationSvc, clinicianRepo, auditSvc)
 	permSvc := permissionService.NewService(permRepo, auditSvc)
-	patientSvc := patientService.NewService(patientRepo, medicalRecordRepo, appointmentRepo, auditSvc)
 	regionSvc := region.NewService(regionRepo, geoIP, auditSvc, defaultConfig)
 
 	// Initialize event tracking middleware
@@ -151,11 +151,11 @@ func main() {
 		OrganizationHandler: organization.NewHandler(accountSvc),
 		AuthHandler:         authHandler.NewHandler(authSvc),
 		ClinicHandler:       clinic.NewHandler(clinicSvc, outboxRepo),
-		UserHandler:         user.NewHandler(userSvc, db),
+		UserHandler:         user.NewHandler(userSvc, patientSvc, db),
 		RBACHandler:         rbacHandler.NewHandler(rbacSvc, outboxRepo),
-		AppointmentHandler:  appointment.NewHandler(appointmentSvc, outboxRepo),
+		AppointmentHandler:  appointment.NewHandler(appointmentSvc, outboxRepo, userRepo),
 		PermissionHandler:   permissionHandler.NewHandler(permSvc, outboxRepo),
-		PatientHandler:      patient.NewHandler(patientSvc, outboxRepo, regionSvc),
+		PatientHandler:      patientHandler.NewHandler(patientSvc, outboxRepo, regionSvc),
 		EventTracker:        eventTracker,
 	}, repos)
 

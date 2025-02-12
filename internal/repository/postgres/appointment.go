@@ -25,10 +25,12 @@ func (r *appointmentRepository) Create(ctx context.Context, appointment *model.A
 	return r.WithTx(ctx, func(tx *sqlx.Tx) error {
 		query := `
 			INSERT INTO appointments (
-				id, patient_id, clinic_id, service_id, clinician_id,
-				start_time, end_time, status, notes, region_code,
+				id, clinic_id, patient_id, clinician_id, staff_id, service_id,
+				appointment_type, status, start_time, end_time, notes,
 				created_at, updated_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			) VALUES (
+				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+			)
 		`
 
 		appointment.ID = uuid.New()
@@ -37,15 +39,16 @@ func (r *appointmentRepository) Create(ctx context.Context, appointment *model.A
 
 		_, err := tx.ExecContext(ctx, query,
 			appointment.ID,
-			appointment.PatientID,
 			appointment.ClinicID,
-			appointment.ServiceID,
+			appointment.PatientID,
 			appointment.ClinicianID,
+			appointment.StaffID,
+			appointment.ServiceID,
+			appointment.AppointmentType,
+			appointment.Status,
 			appointment.StartTime,
 			appointment.EndTime,
-			appointment.Status,
 			appointment.Notes,
-			r.GetRegionFromContext(ctx),
 			appointment.CreatedAt,
 			appointment.UpdatedAt,
 		)
@@ -191,15 +194,15 @@ func (r *appointmentRepository) FindConflictingAppointments(ctx context.Context,
 
 func (r *appointmentRepository) CheckConflicts(ctx context.Context, userID uuid.UUID, startTime, endTime time.Time, excludeID *uuid.UUID) (bool, error) {
 	query := `
-		SELECT EXISTS (
-			SELECT 1 FROM appointments
-			WHERE user_id = $1
-			AND status NOT IN ('cancelled', 'completed')
-			AND (
-				(start_time <= $2 AND end_time > $2)
-				OR (start_time < $3 AND end_time >= $3)
-				OR (start_time >= $2 AND end_time <= $3)
-			)
+		SELECT COUNT(*) > 0
+		FROM appointments
+		WHERE clinician_id = $1
+		AND status NOT IN ('cancelled', 'completed')
+		AND (
+			(start_time <= $2 AND end_time > $2)
+			OR (start_time < $3 AND end_time >= $3)
+			OR (start_time >= $2 AND end_time <= $3)
+		)
 	`
 	args := []interface{}{userID, startTime, endTime}
 
@@ -207,8 +210,6 @@ func (r *appointmentRepository) CheckConflicts(ctx context.Context, userID uuid.
 		query += " AND id != $4"
 		args = append(args, *excludeID)
 	}
-
-	query += ")"
 
 	var hasConflict bool
 	err := r.GetDB().GetContext(ctx, &hasConflict, query, args...)
@@ -220,11 +221,11 @@ func (r *appointmentRepository) CheckConflicts(ctx context.Context, userID uuid.
 
 func (r *appointmentRepository) GetClinicianAppointments(ctx context.Context, userID uuid.UUID, startDate, endDate time.Time) ([]*model.Appointment, error) {
 	query := `
-		SELECT id, clinic_id, user_id, patient_id,
+		SELECT id, clinic_id, clinician_id, patient_id,
 			   start_time, end_time, status, notes,
 			   created_at, updated_at
 		FROM appointments
-		WHERE user_id = $1
+		WHERE clinician_id = $1
 		AND start_time >= $2
 		AND end_time <= $3
 		AND status NOT IN ('cancelled', 'completed')

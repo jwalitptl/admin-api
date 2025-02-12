@@ -10,17 +10,19 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/jwalitptl/admin-api/internal/model"
+	"github.com/jwalitptl/admin-api/internal/service/patient"
 	"github.com/jwalitptl/admin-api/internal/service/user"
 	"github.com/jwalitptl/admin-api/pkg/event"
 )
 
 type Handler struct {
-	service user.UserServicer
-	db      *sqlx.DB
+	service        user.UserServicer
+	patientService patient.PatientServicer
+	db             *sqlx.DB
 }
 
-func NewHandler(service user.UserServicer, db *sqlx.DB) *Handler {
-	return &Handler{service: service, db: db}
+func NewHandler(service user.UserServicer, patientService patient.PatientServicer, db *sqlx.DB) *Handler {
+	return &Handler{service: service, patientService: patientService, db: db}
 }
 
 func (h *Handler) RegisterRoutesWithEvents(r *gin.RouterGroup, eventTracker *event.EventTrackerMiddleware) {
@@ -62,15 +64,20 @@ func (h *Handler) CreateUser(c *gin.Context) {
 	}
 
 	user := &model.User{
+		Base: model.Base{
+			ID: uuid.New(),
+		},
 		OrganizationID: orgID,
 		Email:          req.Email,
-		Name:           req.Name,
-		Password:       req.Password,
+		Name:           req.FirstName + " " + req.LastName,
 		Type:           req.Type,
 		Status:         "active",
+		FirstName:      &req.FirstName,
+		LastName:       &req.LastName,
+		Settings:       req.Settings,
 	}
 
-	if err := h.service.CreateUser(c.Request.Context(), user); err != nil {
+	if err := h.service.CreateUser(c.Request.Context(), user, &req); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

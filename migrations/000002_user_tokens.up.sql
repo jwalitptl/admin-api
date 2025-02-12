@@ -8,6 +8,7 @@ CREATE TABLE user_tokens (
     expires_at TIMESTAMP NOT NULL,
     used_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     region_code VARCHAR(10),
     UNIQUE(user_id, type)
 );

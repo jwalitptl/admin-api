@@ -255,27 +255,19 @@ fi
 
 # Test Clinic Management
 echo -e "\n${GREEN}8. Testing Clinic Management${NC}"
-# Create a test clinic
+# Create test clinic
 echo "Creating test clinic..."
-echo "Debug - Clinic Request: {
-  \"name\": \"Test Clinic\",
-  \"organization_id\": \"$ORG_ID\",
-  \"location\": \"123 Test St\",
-  \"status\": \"active\",
-  \"region_code\": \"US\"
-}"
 CLINIC_RESPONSE=$(curl -s -X POST "${BASE_URL}/clinics" \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Test Clinic",
+    "location": "Test Location",
     "organization_id": "'$ORG_ID'",
-    "location": "123 Test St",
     "status": "active",
     "region_code": "US"
   }')
-echo "Debug - Full Clinic Response: $CLINIC_RESPONSE"
-CLINIC_ID=$(echo $CLINIC_RESPONSE | jq -r '.data.id')
+CLINIC_ID=$(echo "$CLINIC_RESPONSE" | jq -r '.data.id')
 [ ! -z "$CLINIC_ID" ] && [ "$CLINIC_ID" != "null" ]
 assert $? "Clinic creation"
 
@@ -486,20 +478,92 @@ assert $? "Invalid role assignment handling"
 # Test Appointment Management
 echo -e "\n${GREEN}10. Testing Appointment Management${NC}"
 
+# Create admin user first
+echo "Creating admin user..."
+USER_RESPONSE=$(curl -s -X POST "${BASE_URL}/users" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "admin_'$(date +%s)'@example.com",
+    "first_name": "New",
+    "last_name": "User",
+    "type": "admin",
+    "organization_id": "'$ORG_ID'",
+    "clinic_id": "'$CLINIC_ID'",
+    "status": "active",
+    "settings": {}
+  }')
+# Debug - print admin user response
+echo "Admin user response:"
+echo "$USER_RESPONSE" | jq '.'
+USER_ID=$(echo "$USER_RESPONSE" | jq -r '.data.id')
+# Verify admin user was created
+if [ "$USER_ID" = "null" ]; then
+  echo "❌ Failed to create admin user"
+  exit 1
+fi
+echo "Created admin user with ID: $USER_ID"
+
+# Then create test patient user
+echo "Creating test user for appointments..."
+TEST_USER_RESPONSE=$(curl -s -X POST "${BASE_URL}/users" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "testuser@example.com",
+    "first_name": "Test",
+    "last_name": "User",
+    "type": "patient",
+    "organization_id": "'$ORG_ID'",
+    "clinic_id": "'$CLINIC_ID'",
+    "status": "active",
+    "settings": {}
+  }')
+# Debug - print full response
+echo "Full response:"
+echo "$TEST_USER_RESPONSE" | jq '.'
+TEST_USER_ID=$(echo "$TEST_USER_RESPONSE" | jq -r '.data.id')
+# Verify test user was created
+if [ "$TEST_USER_ID" = "null" ]; then
+  echo "❌ Failed to create test user"
+  exit 1
+fi
+
 # Create an appointment
 echo "Creating appointment..."
+# Debug prints
+echo "CLINIC_ID: $CLINIC_ID"
+echo "USER_ID: $USER_ID"
+echo "TEST_USER_ID: $TEST_USER_ID"
+echo "SERVICE_ID: $SERVICE_ID"
+
 APPOINTMENT_RESPONSE=$(curl -s -X POST "${BASE_URL}/appointments" \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "clinic_id": "'$CLINIC_ID'",
-    "patient_id": "'$USER_ID'",
+    "patient_id": "'$TEST_USER_ID'",
+    "clinician_id": "'$USER_ID'",
     "staff_id": "'$USER_ID'",
     "service_id": "'$SERVICE_ID'",
+    "appointment_type": "regular",
     "start_time": "'$(date -v+1d +"%Y-%m-%dT10:00:00Z")'",
     "end_time": "'$(date -v+1d +"%Y-%m-%dT11:00:00Z")'",
-    "status": "scheduled"
+    "notes": "Test appointment"
   }')
+# Debug print the request body
+echo "Request body:"
+echo '{
+  "clinic_id": "'$CLINIC_ID'",
+  "patient_id": "'$TEST_USER_ID'",
+  "clinician_id": "'$USER_ID'",
+  "staff_id": "'$USER_ID'",
+  "service_id": "'$SERVICE_ID'",
+  "appointment_type": "regular",
+  "start_time": "'$(date -v+1d +"%Y-%m-%dT10:00:00Z")'",
+  "end_time": "'$(date -v+1d +"%Y-%m-%dT11:00:00Z")'",
+  "notes": "Test appointment"
+}'
 echo "$APPOINTMENT_RESPONSE" | jq -e '.status == "success"' > /dev/null
 assert $? "Appointment creation"
 
@@ -514,11 +578,13 @@ INVALID_APPOINTMENT_RESPONSE=$(curl -s -X POST "${BASE_URL}/appointments" \
   -d '{
     "clinic_id": "'$CLINIC_ID'",
     "patient_id": "'$USER_ID'",
+    "clinician_id": "'$USER_ID'",
     "staff_id": "'$USER_ID'",
     "service_id": "'$SERVICE_ID'",
+    "appointment_type": "regular",
     "start_time": "'$(date -v+1d +"%Y-%m-%dT10:30:00Z")'",
     "end_time": "'$(date -v+1d +"%Y-%m-%dT11:30:00Z")'",
-    "status": "scheduled"
+    "notes": "Test overlapping appointment"
   }')
 echo "$INVALID_APPOINTMENT_RESPONSE" | jq -e '.status == "error"' > /dev/null
 assert $? "Invalid appointment creation handling"

@@ -62,11 +62,15 @@ type UserFilter struct {
 
 // CreateUserRequest represents user creation parameters
 type CreateUserRequest struct {
-	OrganizationID string `json:"organization_id" binding:"required"`
-	Email          string `json:"email" binding:"required,email"`
-	Name           string `json:"name" binding:"required"`
-	Password       string `json:"password" binding:"required,min=8"`
-	Type           string `json:"type" binding:"required"`
+	FirstName      string  `json:"first_name" binding:"required"`
+	LastName       string  `json:"last_name" binding:"required"`
+	Email          string  `json:"email" binding:"required,email"`
+	Type           string  `json:"type" binding:"required"`
+	Status         string  `json:"status" binding:"required"`
+	Phone          *string `json:"phone"`
+	OrganizationID string  `json:"organization_id" binding:"required"`
+	ClinicID       string  `json:"clinic_id"`
+	Settings       JSONMap `json:"settings"`
 }
 
 // UpdateUserRequest represents user update parameters
@@ -92,4 +96,15 @@ type UserClinic struct {
 	UserID    uuid.UUID `db:"user_id" json:"user_id"`
 	ClinicID  uuid.UUID `db:"clinic_id" json:"clinic_id"`
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
+type Staff struct {
+	Base
+	ID        uuid.UUID `json:"id" db:"id"`
+	ClinicID  uuid.UUID `json:"clinic_id" db:"clinic_id"`
+	UserID    uuid.UUID `json:"user_id" db:"user_id"`
+	Role      string    `json:"role" db:"role"`
+	Status    string    `json:"status" db:"status"`
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
 }

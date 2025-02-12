@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"time"
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
@@ -48,4 +49,14 @@ type TokenClaims struct {
 	Type           string   `json:"type"`
 	Roles          []string `json:"roles"`
 	Permissions    []string `json:"permissions"`
+}
+
+type UserToken struct {
+	ID        uuid.UUID `json:"id" db:"id"`
+	UserID    uuid.UUID `json:"user_id" db:"user_id"`
+	Token     string    `json:"token" db:"token"`
+	Type      string    `json:"type" db:"type"`
+	ExpiresAt time.Time `json:"expires_at" db:"expires_at"`
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
 }

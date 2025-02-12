@@ -13,6 +13,10 @@ import (
 	"github.com/google/uuid"
 )
 
+type PatientServicer interface {
+	CreatePatient(ctx context.Context, patient *model.Patient) error
+}
+
 type PatientService interface {
 	CreatePatient(ctx context.Context, patient *model.Patient) error
 	GetPatient(ctx context.Context, id uuid.UUID) (*model.Patient, error)
@@ -41,14 +45,16 @@ func NewService(repo repository.PatientRepository, medicalRepo repository.Medica
 }
 
 func (s *Service) CreatePatient(ctx context.Context, patient *model.Patient) error {
+	// Set all required fields here
+	if patient.ID == uuid.Nil {
+		patient.ID = uuid.New()
+	}
+	patient.CreatedAt = time.Now()
+	patient.UpdatedAt = time.Now()
+
 	if err := s.validatePatient(patient); err != nil {
 		return fmt.Errorf("invalid patient data: %w", err)
 	}
-
-	patient.ID = uuid.New()
-	patient.CreatedAt = time.Now()
-	patient.UpdatedAt = time.Now()
-	patient.Status = string(model.PatientStatusActive)
 
 	// Marshal JSON fields
 	if err := s.marshalJSONFields(patient); err != nil {
@@ -135,12 +141,14 @@ func (s *Service) DeletePatient(ctx context.Context, id uuid.UUID) error {
 }
 
 func (s *Service) validatePatient(patient *model.Patient) error {
-	if patient.ClinicID == uuid.Nil {
-		return fmt.Errorf("clinic ID is required")
-	}
+	fmt.Printf("Validating patient: %+v\n", patient)
 
 	if patient.OrganizationID == uuid.Nil {
 		return fmt.Errorf("organization ID is required")
+	}
+
+	if patient.ClinicID == uuid.Nil {
+		return fmt.Errorf("clinic ID is required")
 	}
 
 	if patient.FirstName == "" {

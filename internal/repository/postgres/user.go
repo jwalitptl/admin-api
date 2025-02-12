@@ -306,3 +306,45 @@ func (r *userRepository) UpdateEmailVerified(ctx context.Context, userID uuid.UU
 	}
 	return nil
 }
+
+func (r *userRepository) CreateStaff(ctx context.Context, staff *model.Staff) error {
+	fmt.Printf("Creating staff record in database: %+v\n", staff)
+	query := `
+		INSERT INTO staff (id, clinic_id, user_id, role, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`
+	result, err := r.db.ExecContext(ctx, query,
+		staff.ID, staff.ClinicID, staff.UserID, staff.Role, staff.Status,
+		staff.CreatedAt, staff.UpdatedAt)
+	if err != nil {
+		fmt.Printf("Failed to create staff record in database: %v\n", err)
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	fmt.Printf("Created staff record, rows affected: %d\n", rows)
+	return nil
+}
+
+func (r *userRepository) CreateClinicStaff(ctx context.Context, staff *model.ClinicStaff) error {
+	query := `
+		INSERT INTO clinic_staff (user_id, clinic_id, role, created_at)
+		VALUES ($1, $2, $3, $4)
+	`
+	_, err := r.db.ExecContext(ctx, query,
+		staff.UserID, staff.ClinicID, staff.Role, staff.CreatedAt)
+	return err
+}
+
+func (r *userRepository) GetStaff(ctx context.Context, staffID uuid.UUID) (*model.Staff, error) {
+	query := `
+		SELECT id, clinic_id, user_id, role, status, created_at, updated_at
+		FROM staff
+		WHERE id = $1
+	`
+	var staff model.Staff
+	err := r.db.GetContext(ctx, &staff, query, staffID)
+	if err != nil {
+		return nil, err
+	}
+	return &staff, nil
+}

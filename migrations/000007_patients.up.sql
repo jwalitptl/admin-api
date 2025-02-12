@@ -1,5 +1,6 @@
 CREATE TABLE patients (
     id UUID PRIMARY KEY,
+    user_id UUID REFERENCES users(id),
     clinic_id UUID REFERENCES clinics(id),
     organization_id UUID REFERENCES organizations(id),
     first_name VARCHAR(255) NOT NULL,

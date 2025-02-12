@@ -17,16 +17,18 @@ const (
 
 type Appointment struct {
 	Base
-	ClinicID     uuid.UUID         `db:"clinic_id" json:"clinic_id"`
-	ClinicianID  uuid.UUID         `db:"clinician_id" json:"clinician_id"`
-	PatientID    uuid.UUID         `db:"patient_id" json:"patient_id"`
-	ServiceID    uuid.UUID         `db:"service_id" json:"service_id"`
-	StartTime    time.Time         `db:"start_time" json:"start_time"`
-	EndTime      time.Time         `db:"end_time" json:"end_time"`
-	Status       AppointmentStatus `db:"status" json:"status"`
-	Notes        string            `db:"notes" json:"notes,omitempty"`
-	CancelReason *string           `json:"cancel_reason,omitempty" db:"cancel_reason"`
-	CompletedAt  *time.Time        `db:"completed_at" json:"completed_at,omitempty"`
+	ClinicID        uuid.UUID         `db:"clinic_id" json:"clinic_id"`
+	ClinicianID     uuid.UUID         `db:"clinician_id" json:"clinician_id"`
+	PatientID       uuid.UUID         `db:"patient_id" json:"patient_id"`
+	ServiceID       uuid.UUID         `db:"service_id" json:"service_id"`
+	StaffID         uuid.UUID         `db:"staff_id" json:"staff_id"`
+	StartTime       time.Time         `db:"start_time" json:"start_time"`
+	EndTime         time.Time         `db:"end_time" json:"end_time"`
+	Status          AppointmentStatus `db:"status" json:"status"`
+	Notes           string            `db:"notes" json:"notes,omitempty"`
+	CancelReason    *string           `json:"cancel_reason,omitempty" db:"cancel_reason"`
+	CompletedAt     *time.Time        `db:"completed_at" json:"completed_at,omitempty"`
+	AppointmentType string            `json:"appointment_type" db:"appointment_type"`
 }
 
 type CreateAppointmentRequest struct {

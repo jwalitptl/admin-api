@@ -34,6 +34,7 @@ type Patient struct {
 	PhoneNumber          string            `db:"phone_number" json:"phone_number"`
 	EmergencyContactJSON string            `db:"emergency_contact" json:"-"`
 	InsuranceInfoJSON    string            `db:"insurance_info" json:"-"`
+	UserID               uuid.UUID         `json:"user_id" db:"user_id"`
 }
 
 type EmergencyContact struct {

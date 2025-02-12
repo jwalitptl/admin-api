@@ -129,6 +129,9 @@ type (
 		RemoveFromClinic(ctx context.Context, userID, clinicID uuid.UUID) error
 		ListUserClinics(ctx context.Context, userID uuid.UUID) ([]*model.Clinic, error)
 		UpdateEmailVerified(ctx context.Context, userID uuid.UUID, verified bool) error
+		CreateStaff(ctx context.Context, staff *model.Staff) error
+		CreateClinicStaff(ctx context.Context, staff *model.ClinicStaff) error
+		GetStaff(ctx context.Context, staffID uuid.UUID) (*model.Staff, error)
 	}
 
 	OutboxRepository interface {

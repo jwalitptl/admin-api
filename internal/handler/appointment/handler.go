@@ -27,6 +27,7 @@ import (
 
 	"github.com/jwalitptl/admin-api/internal/handler"
 	"github.com/jwalitptl/admin-api/internal/model"
+	"github.com/jwalitptl/admin-api/internal/repository"
 	"github.com/jwalitptl/admin-api/internal/repository/postgres"
 	"github.com/jwalitptl/admin-api/internal/service/appointment"
 	"github.com/jwalitptl/admin-api/pkg/event"
@@ -45,6 +46,7 @@ type Handler struct {
 	cache      *cache.Cache
 	tracer     trace.Tracer
 	propagator propagation.TextMapPropagator
+	userRepo   repository.UserRepository
 }
 
 type metrics struct {
@@ -97,7 +99,7 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 	return m
 }
 
-func NewHandler(service *appointment.Service, outboxRepo postgres.OutboxRepository) *Handler {
+func NewHandler(service *appointment.Service, outboxRepo postgres.OutboxRepository, userRepo repository.UserRepository) *Handler {
 	// Allow 100 requests per second with burst of 200
 	limiter := rate.NewLimiter(rate.Limit(100), 200)
 
@@ -137,6 +139,7 @@ func NewHandler(service *appointment.Service, outboxRepo postgres.OutboxReposito
 		cache:      c,
 		tracer:     tracer,
 		propagator: propagator,
+		userRepo:   userRepo,
 	}
 }
 
@@ -244,21 +247,45 @@ func (h *Handler) CreateAppointment(c *gin.Context) {
 		return
 	}
 
+	// Verify staff exists before creating appointment
+	staff, err := h.userRepo.GetStaff(c, req.StaffID)
+	if err != nil {
+		fmt.Printf("Staff not found, creating staff record for user %s\n", req.StaffID)
+		// Create staff record if it doesn't exist
+		staff = &model.Staff{
+			ID:        req.StaffID,
+			ClinicID:  uuid.MustParse(req.ClinicID),
+			UserID:    req.StaffID,
+			Role:      "admin",
+			Status:    "active",
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+		if err := h.userRepo.CreateStaff(c, staff); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to create staff record: %v", err)})
+			return
+		}
+		fmt.Printf("Created staff record: %+v\n", staff)
+	}
+
 	appointment := &model.Appointment{
 		Base: model.Base{
 			ID: uuid.New(),
 		},
-		ClinicID:    uuid.MustParse(req.ClinicID),
-		ClinicianID: uuid.MustParse(req.ClinicianID),
-		PatientID:   req.PatientID,
-		ServiceID:   req.ServiceID,
-		StartTime:   req.StartTime,
-		EndTime:     req.EndTime,
-		Status:      model.AppointmentStatusScheduled,
-		Notes:       req.Notes,
+		ClinicID:        uuid.MustParse(req.ClinicID),
+		ClinicianID:     uuid.MustParse(req.ClinicianID),
+		PatientID:       req.PatientID,
+		ServiceID:       req.ServiceID,
+		StaffID:         req.StaffID,
+		AppointmentType: req.AppointmentType,
+		StartTime:       req.StartTime,
+		EndTime:         req.EndTime,
+		Status:          model.AppointmentStatusScheduled,
+		Notes:           req.Notes,
 	}
+	fmt.Printf("Debug - Creating appointment: %+v\n", appointment)
 
-	err := h.service.CreateAppointment(ctx, appointment)
+	err = h.service.CreateAppointment(ctx, appointment)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "failed to create appointment")

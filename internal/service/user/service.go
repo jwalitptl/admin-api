@@ -12,6 +12,7 @@ import (
 	"github.com/jwalitptl/admin-api/internal/model"
 	"github.com/jwalitptl/admin-api/internal/repository"
 	"github.com/jwalitptl/admin-api/internal/service/audit"
+	"github.com/jwalitptl/admin-api/internal/service/patient"
 )
 
 const (
@@ -23,7 +24,7 @@ const (
 )
 
 type UserServicer interface {
-	CreateUser(ctx context.Context, user *model.User) error
+	CreateUser(ctx context.Context, user *model.User, req *model.CreateUserRequest) error
 	GetUser(ctx context.Context, id uuid.UUID) (*model.User, error)
 	UpdateUser(ctx context.Context, user *model.User) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
@@ -38,22 +39,24 @@ type UserServicer interface {
 }
 
 type Service struct {
-	repo      repository.UserRepository
-	emailSvc  email.Service
-	auditor   *audit.Service
-	tokenRepo repository.TokenRepository
+	repo           repository.UserRepository
+	emailSvc       email.Service
+	auditor        *audit.Service
+	tokenRepo      repository.TokenRepository
+	patientService patient.PatientServicer
 }
 
-func NewService(repo repository.UserRepository, emailSvc email.Service, tokenRepo repository.TokenRepository, auditor *audit.Service) *Service {
+func NewService(repo repository.UserRepository, emailSvc email.Service, tokenRepo repository.TokenRepository, auditor *audit.Service, patientService patient.PatientServicer) *Service {
 	return &Service{
-		repo:      repo,
-		emailSvc:  emailSvc,
-		tokenRepo: tokenRepo,
-		auditor:   auditor,
+		repo:           repo,
+		emailSvc:       emailSvc,
+		tokenRepo:      tokenRepo,
+		auditor:        auditor,
+		patientService: patientService,
 	}
 }
 
-func (s *Service) CreateUser(ctx context.Context, user *model.User) error {
+func (s *Service) CreateUser(ctx context.Context, user *model.User, req *model.CreateUserRequest) error {
 	if err := s.validateUser(user); err != nil {
 		return fmt.Errorf("invalid user data: %w", err)
 	}
@@ -71,6 +74,65 @@ func (s *Service) CreateUser(ctx context.Context, user *model.User) error {
 
 	if err := s.repo.Create(ctx, user); err != nil {
 		return fmt.Errorf("failed to create user: %w", err)
+	}
+
+	// If admin user, assign to clinic as staff
+	if user.Type == "admin" {
+		if req.ClinicID != "" {
+			cid, err := uuid.Parse(req.ClinicID)
+			if err != nil {
+				return fmt.Errorf("invalid clinic ID: %w", err)
+			}
+
+			// Create staff record first
+			staff := &model.Staff{
+				ID:        user.ID, // Using user ID as staff ID
+				ClinicID:  cid,
+				UserID:    user.ID,
+				Role:      "admin",
+				Status:    "active",
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}
+			fmt.Printf("Creating staff record: %+v\n", staff)
+			if err := s.repo.CreateStaff(ctx, staff); err != nil {
+				fmt.Printf("Failed to create staff: %v\n", err)
+				return fmt.Errorf("failed to create staff record: %w", err)
+			}
+			fmt.Printf("Successfully created staff record with ID: %s\n", staff.ID)
+		}
+	}
+
+	// If user type is patient, create patient record
+	if user.Type == "patient" {
+		if req.ClinicID == "" {
+			return fmt.Errorf("clinic ID is required for patient users")
+		}
+		cid, err := uuid.Parse(req.ClinicID)
+		if err != nil {
+			return fmt.Errorf("invalid clinic ID: %w", err)
+		}
+
+		// Debug log
+		fmt.Printf("Creating patient with clinic ID: %s\n", cid)
+
+		patient := &model.Patient{
+			Base:           model.Base{ID: uuid.New()},
+			ID:             user.ID,
+			OrganizationID: user.OrganizationID,
+			ClinicID:       cid,
+			FirstName:      *user.FirstName,
+			LastName:       *user.LastName,
+			Email:          user.Email,
+			Status:         "active",
+			DateOfBirth:    time.Now(),
+			Gender:         "prefer_not_to_say",
+			UserID:         user.ID,
+		}
+		fmt.Printf("Created patient object: %+v\n", patient)
+		if err := s.patientService.CreatePatient(ctx, patient); err != nil {
+			return fmt.Errorf("failed to create patient record: %w", err)
+		}
 	}
 
 	// Send verification email

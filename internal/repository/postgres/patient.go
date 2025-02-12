@@ -22,6 +22,7 @@ func NewPatientRepository(base BaseRepository) repository.PatientRepository {
 }
 
 func (r *patientRepository) Create(ctx context.Context, patient *model.Patient) error {
+	fmt.Printf("Saving patient to DB: %+v\n", patient)
 	return r.WithTx(ctx, func(tx *sqlx.Tx) error {
 		query := `
 			INSERT INTO patients (
@@ -31,10 +32,6 @@ func (r *patientRepository) Create(ctx context.Context, patient *model.Patient) 
 				created_at, updated_at
 			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		`
-
-		patient.ID = uuid.New()
-		patient.CreatedAt = time.Now()
-		patient.UpdatedAt = time.Now()
 
 		emergencyContact, err := json.Marshal(patient.EmergencyContact)
 		if err != nil {
