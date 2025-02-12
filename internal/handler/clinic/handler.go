@@ -188,22 +188,27 @@ func (h *Handler) UpdateClinic(c *gin.Context) {
 func (h *Handler) DeleteClinic(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
+		log.Printf("Debug - Invalid clinic ID format: %s", c.Param("id"))
 		c.JSON(http.StatusBadRequest, handler.NewErrorResponse("invalid clinic ID"))
 		return
 	}
+	log.Printf("Debug - Attempting to delete clinic with ID: %s", id)
 
 	// First delete associated clinic_staff records
 	if err := h.service.DeleteClinicStaff(c.Request.Context(), id); err != nil {
+		log.Printf("Debug - Failed to delete clinic staff: %v", err)
 		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(fmt.Sprintf("failed to delete clinic staff: %v", err)))
 		return
 	}
 
 	// Then delete the clinic
 	if err := h.service.DeleteClinic(c.Request.Context(), id); err != nil {
+		log.Printf("Debug - Failed to delete clinic: %v", err)
 		c.JSON(http.StatusInternalServerError, handler.NewErrorResponse(fmt.Sprintf("failed to delete clinic: %v", err)))
 		return
 	}
 
+	log.Printf("Debug - Successfully deleted clinic: %s", id)
 	c.JSON(http.StatusOK, handler.NewSuccessResponse("clinic deleted successfully"))
 }
 

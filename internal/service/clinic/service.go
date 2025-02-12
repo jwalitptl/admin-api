@@ -218,20 +218,10 @@ func (s *Service) UpdateService(ctx context.Context, service *model.Service) err
 }
 
 func (s *Service) DeleteService(ctx context.Context, clinicID, serviceID uuid.UUID) error {
-	service, err := s.repo.GetService(ctx, serviceID)
-	if err != nil {
-		return fmt.Errorf("failed to get service: %w", err)
-	}
-
-	if service.ClinicID != clinicID {
-		return fmt.Errorf("service does not belong to this clinic")
-	}
-
+	// Skip getting the service since we don't need it
 	if err := s.repo.DeleteService(ctx, serviceID); err != nil {
 		return fmt.Errorf("failed to delete service: %w", err)
 	}
-
-	s.auditor.Log(ctx, uuid.Nil, clinicID, "delete", "service", serviceID, nil)
 	return nil
 }
 

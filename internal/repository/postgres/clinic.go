@@ -97,23 +97,62 @@ func (r *clinicRepository) Update(ctx context.Context, clinic *model.Clinic) err
 }
 
 func (r *clinicRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query := `
-		DELETE FROM clinics
-		WHERE id = $1
-	`
-	result, err := r.db.ExecContext(ctx, query, id)
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Delete in correct order based on foreign key dependencies
+
+	// 1. Delete medical records first (they depend on patients)
+	log.Printf("Debug - Deleting medical records")
+	if _, err := tx.ExecContext(ctx, `DELETE FROM medical_records WHERE patient_id IN (SELECT id FROM patients WHERE clinic_id = $1)`, id); err != nil {
+		return fmt.Errorf("failed to delete medical records: %w", err)
+	}
+
+	// 2. Delete appointments
+	log.Printf("Debug - Deleting appointments")
+	if _, err := tx.ExecContext(ctx, `DELETE FROM appointments WHERE clinic_id = $1`, id); err != nil {
+		return fmt.Errorf("failed to delete appointments: %w", err)
+	}
+
+	// 3. Delete patients
+	log.Printf("Debug - Deleting patients")
+	if _, err := tx.ExecContext(ctx, `DELETE FROM patients WHERE clinic_id = $1`, id); err != nil {
+		return fmt.Errorf("failed to delete patients: %w", err)
+	}
+
+	// 4. Delete services
+	log.Printf("Debug - Deleting services")
+	if _, err := tx.ExecContext(ctx, `DELETE FROM services WHERE clinic_id = $1`, id); err != nil {
+		return fmt.Errorf("failed to delete services: %w", err)
+	}
+
+	// 5. Delete clinic staff
+	log.Printf("Debug - Deleting clinic staff")
+	if _, err := tx.ExecContext(ctx, `DELETE FROM clinic_staff WHERE clinic_id = $1`, id); err != nil {
+		return fmt.Errorf("failed to delete clinic staff: %w", err)
+	}
+
+	// 6. Delete staff records
+	log.Printf("Debug - Deleting staff records")
+	if _, err := tx.ExecContext(ctx, `DELETE FROM staff WHERE clinic_id = $1`, id); err != nil {
+		return fmt.Errorf("failed to delete staff records: %w", err)
+	}
+
+	// 7. Finally delete the clinic
+	log.Printf("Debug - Deleting clinic")
+	if _, err := tx.ExecContext(ctx, `DELETE FROM clinics WHERE id = $1`, id); err != nil {
 		return fmt.Errorf("failed to delete clinic: %w", err)
 	}
 
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	}
-	if rows == 0 {
-		return fmt.Errorf("clinic not found")
+	if err := tx.Commit(); err != nil {
+		log.Printf("Debug - Failed to commit transaction: %v", err)
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
+	log.Printf("Debug - Successfully deleted clinic and all related records")
 	return nil
 }
 
@@ -293,36 +332,31 @@ func (r *clinicRepository) UpdateService(ctx context.Context, service *model.Ser
 }
 
 func (r *clinicRepository) DeleteService(ctx context.Context, serviceID uuid.UUID) error {
-	query := `DELETE FROM services WHERE id = $1`
-	_, err := r.db.ExecContext(ctx, query, serviceID)
-	if err != nil {
-		return fmt.Errorf("failed to delete service: %w", err)
-	}
-	return nil
-}
-
-func (r *clinicRepository) DeleteClinic(ctx context.Context, id uuid.UUID) error {
-	// Delete in order: patients -> clinic_staff -> clinic
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	// Delete patients
-	if _, err := tx.ExecContext(ctx, `DELETE FROM patients WHERE clinic_id = $1`, id); err != nil {
-		return fmt.Errorf("failed to delete patients: %w", err)
+	// First delete appointments using this service
+	if _, err := tx.ExecContext(ctx, `DELETE FROM appointments WHERE service_id = $1`, serviceID); err != nil {
+		return fmt.Errorf("failed to delete appointments: %w", err)
 	}
 
-	// Delete clinic staff
-	if _, err := tx.ExecContext(ctx, `DELETE FROM clinic_staff WHERE clinic_id = $1`, id); err != nil {
-		return fmt.Errorf("failed to delete clinic staff: %w", err)
+	// Then delete the service, ignore if it doesn't exist
+	if _, err := tx.ExecContext(ctx, `DELETE FROM services WHERE id = $1`, serviceID); err != nil {
+		return fmt.Errorf("failed to delete service: %w", err)
 	}
 
-	// Delete clinic
-	if _, err := tx.ExecContext(ctx, `DELETE FROM clinics WHERE id = $1`, id); err != nil {
-		return fmt.Errorf("failed to delete clinic: %w", err)
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	return tx.Commit()
+	return nil
+}
+
+func (r *clinicRepository) DeleteClinicStaff(ctx context.Context, clinicID uuid.UUID) error {
+	query := `DELETE FROM clinic_staff WHERE clinic_id = $1`
+	_, err := r.db.ExecContext(ctx, query, clinicID)
+	return err
 }
